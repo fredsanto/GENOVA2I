@@ -49,8 +49,15 @@ logger = logging.getLogger(__name__)
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-LITVAR2_BASE = "https://www.ncbi.nlm.nih.gov/research/litvar2-api"
-LITVAR2_URL  = f"{LITVAR2_BASE}/variant/get/litvar@{{rsid}}%23%23/publications"
+LITVAR2_BASE       = "https://www.ncbi.nlm.nih.gov/research/litvar2-api"
+LITVAR2_URL        = f"{LITVAR2_BASE}/variant/get/litvar@{{rsid}}%23%23/publications"
+LITVAR2_AUTOCOMPLETE_URL = f"{LITVAR2_BASE}/variant/autocomplete/"
+
+# Extracts the protein-change token from a combined HGVS field, e.g.
+# "NM_000330.4(RS1):c.214G>A (p.Glu72Lys)" → "p.Glu72Lys", or a bare
+# "p.E72K" short form. LitVar2's autocomplete accepts either 3-letter or
+# 1-letter amino acid codes.
+_PROTEIN_CHANGE_RE = re.compile(r"p\.\(?([A-Za-z*]{1,3}\d+[A-Za-z*]{1,3}(?:fs\*?\d*)?)\)?")
 NCBI_BASE    = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 # Without API key: 3 req/s → 0.34 s delay.  With API key: 10 req/s → 0.11 s delay.
 # Set NCBI_API_KEY env var (free key from https://www.ncbi.nlm.nih.gov/account/).
@@ -307,6 +314,45 @@ class LitVar2SummaryTool(SLMTool):
                 if cls._cgd_inheritance is None:   # double-checked locking
                     cls._cgd_table, cls._cgd_inheritance = cls._load_cgd_table()
         return cls._cgd_inheritance.get(gene.upper(), "")
+
+    # ── step 0: gene + protein-change → rsID (autocomplete path) ────────────
+
+    @staticmethod
+    def extract_protein_change(hgvs: str) -> str | None:
+        """Pulls the 'p.XxxNNNXxx' token out of a combined HGVS string, e.g.
+        'NM_000330.4(RS1):c.214G>A (p.Glu72Lys)' → 'p.Glu72Lys'."""
+        if not hgvs or hgvs == "NA":
+            return None
+        m = _PROTEIN_CHANGE_RE.search(hgvs)
+        return f"p.{m.group(1)}" if m else None
+
+    def _resolve_rsid_by_gene_protein(self, gene: str, protein_change: str) -> str | None:
+        """
+        LitVar2's own index is rsID-keyed, but its autocomplete endpoint resolves
+        a free-text 'GENE proteinchange' query (e.g. "RS1 E72K") to the matching
+        rsID — this lets Track 3 find variant-level literature even when the
+        input CSV's RS_ID column is NA (common in clinical exports) but the gene
+        and protein change are known, instead of skipping variant-level search
+        outright whenever RS_ID is missing.
+        """
+        query = f"{gene} {protein_change}"
+        try:
+            _ncbi_rate_limit()
+            resp = requests.get(
+                LITVAR2_AUTOCOMPLETE_URL, params={"query": query}, timeout=self.timeout
+            )
+            resp.raise_for_status()
+            results = resp.json()
+        except Exception as e:
+            logger.debug("LitVar2 autocomplete failed for %r: %s", query, e)
+            return None
+
+        if not results:
+            return None
+        rsid = results[0].get("rsid")
+        if rsid and re.match(r"^rs\d+$", rsid, re.IGNORECASE):
+            return rsid
+        return None
 
     # ── step 1: LitVar2 → PMIDs (rsID path) ──────────────────────────────────
 
@@ -844,6 +890,7 @@ class LitVar2SummaryTool(SLMTool):
         """
         rsid = context.field("RS_ID")
         gene = context.field("Gene")
+        hgvs = context.field("HGVS")
 
         if self._disease_query is None:
             with self._disease_query_lock:
@@ -852,6 +899,21 @@ class LitVar2SummaryTool(SLMTool):
 
         rsid_ok = rsid != "NA" and re.match(r"^rs\d+$", rsid, re.IGNORECASE) is not None
         gene_ok = gene != "NA" and gene.strip() != ""
+
+        # RS_ID is frequently NA in clinical CSV exports even when the variant
+        # has a real, resolvable rsID — don't skip variant-level search just
+        # because the input column is empty; resolve it from gene+protein
+        # change instead (see _resolve_rsid_by_gene_protein).
+        if not rsid_ok and gene_ok:
+            protein_change = self.extract_protein_change(hgvs)
+            if protein_change:
+                resolved = self._resolve_rsid_by_gene_protein(gene, protein_change)
+                if resolved:
+                    logger.info(
+                        "LitVar2SummaryTool: resolved rsid=%s from gene=%s protein_change=%s "
+                        "(RS_ID column was NA)", resolved, gene, protein_change,
+                    )
+                    rsid, rsid_ok = resolved, True
 
         parts = []
 

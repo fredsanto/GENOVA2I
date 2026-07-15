@@ -21,6 +21,7 @@ from pipeline.tools.websearch import (
     DEFAULT_TIMEOUT,
     DEFAULT_MAX_CHARS,
 )
+from pipeline.core.acmg_sf import is_pathogenic_clinvar
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,127 @@ class NCBIFetchTool(NetworkTool):
 
     # ── ClinVar variation ──────────────────────────────────────────────────────
 
+    # Words that mark a submitter <Comment> as carrying functional/experimental
+    # evidence (PS3-relevant) rather than a generic classification remark.
+    _FUNCTIONAL_MARKERS = (
+        "functional stud", "in vitro", "in vivo", "assay", "minigene",
+        "splicing assay", "reporter assay", "enzymatic activity",
+        "protein function", "functional assay", "functional analysis",
+        "functional characterization", "experimentally",
+    )
+
+    # Normalizes whatever GermlineClassification text ClinVar submitters used
+    # into one of the 5 standard tally buckets.
+    _CLASS_BUCKETS = {
+        "pathogenic": "Pathogenic",
+        "likely pathogenic": "Likely pathogenic",
+        "uncertain significance": "VUS",
+        "likely benign": "Likely benign",
+        "benign": "Benign",
+    }
+
+    def _fetch_clinvar_submissions(self, variation_id: str) -> str:
+        """
+        Fetch the per-submission record (efetch rettype=vcv, the current format —
+        the older 'clinvarset' rettype used previously is deprecated and returns
+        an empty <set/> silently, which is why this used to report "no comments
+        found" on every variant regardless of what ClinVar actually holds).
+
+        Returns:
+          1. Classification tally across all individual submitters (P/LP/VUS/LB/B
+             counts) — shows whether a P/LP call is a strong multi-submitter
+             consensus or a single outlier assertion.
+          2. For each Pathogenic/Likely pathogenic submission: its evidentiary
+             rationale (Classification/Comment) and its source (submitter name +
+             SCV accession + cited PMIDs) — so a P/LP call can be traced back to
+             why and by whom, not just accepted as an aggregate label.
+        """
+        try:
+            xml = _ncbi_get(
+                "efetch.fcgi",
+                {"db": "clinvar", "id": variation_id, "rettype": "vcv",
+                 "is_variationid": "true", "retmode": "xml"},
+                self.timeout,
+            ).text
+            root = ET.fromstring(xml)
+        except Exception as e:
+            return f"ClinVar submission fetch error for variation {variation_id}: {e}"
+
+        va = root.find(".//VariationArchive")
+        if va is None:
+            return "No ClinVar variation archive found for this ID."
+        cr = va.find("ClassifiedRecord")
+        if cr is None:
+            return "No classified record in ClinVar archive for this ID."
+
+        cal = cr.find("ClinicalAssertionList")
+        assertions = cal.findall("ClinicalAssertion") if cal is not None else []
+        if not assertions:
+            return "No individual submissions found in ClinVar archive for this ID."
+
+        counts: dict[str, int] = {}
+        pl_evidence: list[str] = []
+        for ca in assertions:
+            cl = ca.find("Classification")
+            if cl is None:
+                continue
+            desc_el = cl.find("GermlineClassification")
+            desc = (desc_el.text or "").strip() if desc_el is not None and desc_el.text else "Not provided"
+            bucket = self._CLASS_BUCKETS.get(desc.lower(), desc)
+            counts[bucket] = counts.get(bucket, 0) + 1
+
+            if desc.lower() in ("pathogenic", "likely pathogenic"):
+                acc = ca.find("ClinVarAccession")
+                submitter = acc.get("SubmitterName", "Unknown submitter") if acc is not None else "Unknown submitter"
+                scv = acc.get("Accession", "") if acc is not None else ""
+                comment_el = cl.find("Comment")
+                comment = _clean_xml_text(comment_el.text) if comment_el is not None and comment_el.text else ""
+                pmids = [c.find("ID").text for c in cl.findall("Citation")
+                         if c.find("ID") is not None and c.find("ID").get("Source") == "PubMed"]
+
+                line = f"- [{desc}] source: {submitter} ({scv})"
+                if pmids:
+                    line += f" — cites PMID: {', '.join(pmids[:8])}"
+                if comment:
+                    tag = " [mentions functional/experimental evidence]" if \
+                        any(m in comment.lower() for m in self._FUNCTIONAL_MARKERS) else ""
+                    line += f"{tag}\n  Rationale: {comment[:600]}"
+                pl_evidence.append(line)
+
+        total = sum(counts.values())
+        tally = ", ".join(f"{k}={v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1]))
+        parts = [f"ClinVar submission breakdown ({total} submissions): {tally}"]
+
+        if pl_evidence:
+            parts.append(
+                "Pathogenic/Likely pathogenic submissions — evidence & source:\n"
+                + "\n".join(pl_evidence[:10])
+            )
+        else:
+            parts.append(
+                "No individual submission was itself classified Pathogenic/Likely "
+                "pathogenic (the aggregate classification, if P/LP, comes from expert "
+                "panel review or consensus across the counts above rather than a "
+                "single traceable submission)."
+            )
+
+        return "\n\n".join(parts)
+
+    def resolve_clinvar_id(self, gene: str, hgvs: str) -> str | None:
+        """Look up a ClinVar variation ID for gene+HGVS via esearch (no URL known yet)."""
+        term = f"{gene}[gene] AND {hgvs}[variant name]" if hgvs and hgvs != "NA" else f"{gene}[gene]"
+        try:
+            data = _ncbi_get(
+                "esearch.fcgi",
+                {"db": "clinvar", "term": term, "retmode": "json", "retmax": 1},
+                self.timeout,
+            ).json()
+            ids = data.get("esearchresult", {}).get("idlist", [])
+        except Exception as e:
+            logger.debug("ClinVar esearch failed for %s: %s", term, e)
+            return None
+        return ids[0] if ids else None
+
     def _fetch_clinvar(self, variation_id: str) -> str:
         logger.debug("Fetching ClinVar variation_id=%s", variation_id)
         try:
@@ -160,6 +282,10 @@ class NCBIFetchTool(NetworkTool):
         gene       = ", ".join(g["symbol"] for g in result.get("genes", []) if "symbol" in g)
         conditions = ", ".join(t["name"]   for t in result.get("trait_set", []) if "name" in t)
 
+        comments_block = ""
+        if is_pathogenic_clinvar(germline):
+            comments_block = "\n\n" + self._fetch_clinvar_submissions(variation_id)
+
         return (
             f"Variant:    {name}\n"
             f"Gene:       {gene}\n"
@@ -168,6 +294,7 @@ class NCBIFetchTool(NetworkTool):
             f"Review:     {review}\n"
             f"Evaluated:  {last_eval}\n"
             f"URL:        https://www.ncbi.nlm.nih.gov/clinvar/variation/{variation_id}/"
+            f"{comments_block}"
         )
 
     # ── Router ─────────────────────────────────────────────────────────────────

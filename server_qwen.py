@@ -145,6 +145,11 @@ async def _finish_job(job_id: str) -> None:
     async with _lock:
         if job_id in _jobs:
             _jobs[job_id]["status"] = "done"
+            # Reset the TTL clock to completion time — long runs (many variants,
+            # deep per-variant web search) can themselves take close to or over
+            # the 1h cleanup window, which was deleting jobs from memory right as
+            # they finished, 404-ing /chat before the user ever saw the result.
+            _jobs[job_id]["ts"] = datetime.now().timestamp()
     if _active_job_id == job_id:
         _active_job_id = None
 

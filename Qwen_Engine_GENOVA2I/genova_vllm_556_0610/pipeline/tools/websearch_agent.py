@@ -30,6 +30,7 @@ from pipeline.tools.base import ReActTool
 from pipeline.core.context import ToolContext
 from pipeline.tools.websearch import WebSearchTool, WebFetchTool
 from pipeline.tools.ncbi import NCBIFetchTool
+from pipeline.core.acmg_sf import is_pathogenic_clinvar
 
 
 # ─────────────────────────────────────────────
@@ -519,6 +520,36 @@ class WebSearchAgentTool(ReActTool):
             if variant_search_result and not variant_search_result.startswith(("Error", "No results")):
                 prefetched_parts.append(
                     f"VARIANT WEB SEARCH ({variant_query}):\n{variant_search_result}"
+                )
+
+        # ── Forced ClinVar submission-level check (P/LP variants) ───────────
+        # ClinVar_class P/LP in the input CSV is just an aggregate label — it
+        # doesn't say how many submitters agree, nor what evidence backs it
+        # (needed to ground PS3). The generic pre-loop checkpoint below only
+        # "prefers" checking ClinVar details as one of several primary gaps and
+        # can be satisfied by other evidence without ever pulling ClinVar's own
+        # per-submission records, so this fetch is forced unconditionally
+        # whenever ClinVar_class reads Pathogenic/Likely pathogenic, pulling:
+        # (1) the classification tally across all individual submitters
+        #     (P/LP/VUS/LB/B counts), and
+        # (2) for each P/LP submission, its rationale and source (submitter +
+        #     SCV accession + cited PMIDs) — so a P/LP call can be traced back
+        #     to why and by whom, not just accepted as an aggregate label.
+        clinvar_class = (variant.get("ClinVar_class") or "").strip()
+        if is_pathogenic_clinvar(clinvar_class) and gene and gene != "NA":
+            _ncbi = NCBIFetchTool()
+            variation_id = _ncbi.resolve_clinvar_id(gene, hgvs)
+            if variation_id:
+                clinvar_detail = _ncbi._fetch_clinvar(variation_id)
+                prefetched_parts.append(
+                    f"CLINVAR SUBMISSION-LEVEL CHECK (forced — ClinVar_class={clinvar_class}):\n"
+                    f"{clinvar_detail}"
+                )
+            else:
+                prefetched_parts.append(
+                    f"CLINVAR SUBMISSION-LEVEL CHECK (forced — ClinVar_class={clinvar_class}): "
+                    "could not resolve a ClinVar variation ID for gene+HGVS — classification "
+                    "breakdown and PS3 evidence cannot be pulled from ClinVar for this variant."
                 )
 
         prefetched = "\n\n".join(prefetched_parts)
