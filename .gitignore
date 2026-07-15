@@ -1,0 +1,7 @@
+Qwen_Engine_GENOVA2I/env_vllm_0606/
+*.log
+results/
+__pycache__/
+.connection
+*.bak
+*.bak2

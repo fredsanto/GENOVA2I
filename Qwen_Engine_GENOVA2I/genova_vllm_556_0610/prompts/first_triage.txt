@@ -1,0 +1,41 @@
+Patient phenotype: {patient_phenotype}
+
+Retrieved evidence:
+{variant_context}
+
+TASK — DISCARD ASSESSMENT:
+
+Decide whether this variant can be discarded with high confidence because it
+does not explain the patient's phenotype. Discard ONLY when the case against
+relevance clearly outweighs the case for it. When the two are balanced or
+uncertain, KEEP.
+
+Base your assessment solely on the evidence above.
+
+Weight the retrieved evidence as follows:
+- "PubMed gene-disease evidence" → strong reason to keep (gene linked to phenotype).
+- "NO DISEASE LINK" → reason to discard (gene unrelated to phenotype).
+- "LitVar2 variant-specific evidence" present → strong reason to keep (this exact variant is studied).
+- ClinVar Benign or Likely benign with no conflict → reason to discard.
+- VUS, missing, or conflicting evidence → keep.
+- Mechanistic, pathway, or functional relevance (no gene–disease link) → weak reason to keep.
+
+Output exactly three lines and nothing else:
+Keep-case: <strongest reason to KEEP — must be a positive or uncertain argument, ≤15 words>
+Discard-case: <strongest reason to DISCARD — must be a contrary or disqualifying argument, ≤15 words>
+Decision: KEEP or DISCARD
+
+Keep-case and Discard-case must be opposing perspectives. Keep-case is the best argument
+FOR keeping the variant (e.g. gene relevant, variant rare, mechanism plausible, uncertain).
+Discard-case is the best argument AGAINST it (e.g. benign, common, unrelated gene).
+If there is truly no argument for one side, write "no argument".
+
+Example output (balanced):
+Keep-case: gene linked to phenotype, variant rare
+Discard-case: ClinVar benign, AF 0.12
+Decision: DISCARD
+
+Example output (no positive evidence):
+Keep-case: PVS1 very strong; rare variant in known RP gene
+Discard-case: no gene-disease link in literature; no reported evidence
+Decision: KEEP

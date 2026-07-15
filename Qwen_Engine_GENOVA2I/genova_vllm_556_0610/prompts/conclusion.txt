@@ -1,0 +1,98 @@
+
+Patient phenotype and augmented evidence:
+{augmented_context}
+
+PRIOR REASONING:
+{reasoning_output}
+
+{cross_analysis_block}
+
+TASK — STRUCTURED REPORT FOR THIS VARIANT:
+
+Using your prior reasoning above, produce the final clinical report for this variant. Do NOT re-derive or repeat reasoning steps — synthesize only.
+
+CITATIONS ARE MANDATORY, NOT OPTIONAL: every factual claim below (molecular mechanism, ClinVar classification, phenotype-gene association, frequency source, in-silico score, functional study, hotspot/domain status) that is traceable to a specific source in the evidence above MUST be cited inline immediately after that claim, using (PMID:XXXXXXXX) for PubMed papers or a bare URL in parentheses for web/tool sources. Do not write an uncited sentence when a citation for it exists in the evidence above — go back and find it. Only cite sources that genuinely support the specific claim; do not cite a source for a claim it doesn't actually support, and do not invent a PMID/URL not present in the evidence above (citations not traceable to the evidence are stripped automatically). Do not add a references section.
+
+If ALLELIC BALANCE data was provided, use it to determine segregation status. If no parental data is available, state "no parental data" for segregation.
+
+This is the MOI-agnostic BASE score for this variant — it covers only
+variant-intrinsic evidence (mechanism, frequency, in-silico scores, functional
+studies, phenotype specificity). It deliberately does NOT include de novo
+status (PS2) or family cosegregation (PP1) — those are mode-of-inheritance-
+dependent and are scored separately by downstream MOI-specific analyses (de
+novo, dominant-inherited, recessive, X-linked), which ADD their own criteria
+on top of this base score. Do not attempt to apply PS2 or PP1 here even if
+the evidence suggests them.
+
+PHENOTYPE PERTINENCE CHECK (mandatory, check before writing Phenotype fit):
+If PRIOR REASONING contains a "GENE-PHENOTYPE LITERATURE PERTINENCE
+(backend-determined)" block stating no gene-phenotype literature link was
+found, Phenotype fit CANNOT be "match" — set it to "mismatch" or "uncertain"
+regardless of what the rest of the reasoning text implies, and do not apply
+PVS1 (its gate below depends on Phenotype fit). A backend value of "positive
+link found" supports but does not by itself guarantee "match" — still ground
+the specific mechanism/phenotype fit judgment in the evidence as before. If
+that block is absent or says "unknown", judge Phenotype fit from the evidence
+as before, unconstrained.
+
+RECESSIVE SINGLE-HIT CHECK (mandatory, check before writing Inheritance check):
+If PRIOR REASONING states the gene inheritance mode is autosomal recessive (AR)
+or X-linked recessive (XLR), this variant is heterozygous, AND PRIOR
+REASONING's compound-het check row says "No second variant in gene" (no
+sibling variant present, and this variant itself is not homozygous) — this
+variant ALONE is insufficient to explain a recessive phenotype, no matter how
+strong its individual ACMG evidence (PVS1, high CADD, etc.) looks. In that
+case: set Inheritance check to "insufficient data — recessive gene, single
+heterozygous hit, no second variant identified", and state explicitly in the
+Comment that this variant cannot be concluded as causative on its own under
+this recessive model. Do not describe the variant as causative, explanatory
+of the phenotype, or diagnostic by itself in this scenario.
+
+Use exactly this format:
+
+# Variant [N] — [GENE] ([HGVS])
+**Molecular mechanism:** [one sentence]
+**ClinVar:** [classification (e.g. Pathogenic/Likely pathogenic/VUS/Likely benign/Benign/Conflicting), review status/submitter count if stated in the evidence, or "no ClinVar entry found in evidence" if absent — state this explicitly regardless of whether it maps to an ACMG criterion below]
+**Phenotype fit:** [match / mismatch / uncertain] — [one sentence justification]
+**Inheritance check:** [consistent / inconsistent / insufficient data]
+**Segregation:** [de novo / inherited from mother / inherited from father / both parents carriers / uncertain / no parental data]
+**Evidence strength:** [strong / moderate / weak / absent]
+**ACMG criteria:**
+- [Criterion] [Strength] (+/-N pts): [one-sentence justification grounded in evidence]
+- [Criterion] [Strength] (+/-N pts): [one-sentence justification grounded in evidence]
+[list ALL applicable ACMG criteria, each on its own line, with its point value from the table below]
+**ACMG points:** [sum of points] → [classification from the thresholds below]
+**Comment:** [2–3 sentences]
+
+ACMG criteria guidance (point value in brackets, per Tavtigian et al. 2020 Bayesian point system):
+- PVS1 [VeryStrong, +8]: Loss-of-function variant in a gene where LoF is a known disease mechanism (use AutoPVS1 output when available). Only apply if Phenotype fit above is "match" — a LoF mechanism alone does not justify PVS1 if the gene is not linked to the patient's phenotype (Phenotype fit "mismatch" or "uncertain"). If phenotype fit is not a match, do not apply PVS1 regardless of AutoPVS1 strength; note the mechanism as unconfirmed disease relevance instead.
+- PS1 [Strong, +4]: Same amino acid change as a previously established pathogenic variant.
+- PS3 [Strong, +4]: Well-established in vitro or in vivo functional studies supporting a damaging effect. When multiple studies conflict, weight the most recent publication (highest year in the [PMID:XXXXXXXX, YEAR] citation) more heavily and note the disagreement rather than silently picking one.
+- PS4 [Strong, +4]: The prevalence of the variant in affected individuals is significantly increased over its prevalence in controls (case-control literature evidence).
+- PM1 [Moderate, +2]: Located in a mutational hot spot and/or critical and well-established functional domain.
+- PM2 [Moderate, +2]: Absent from controls in population databases (gnomAD, ExAC) or at very low frequency. Check this independently of de novo/PS2 status — always report the Frequency field.
+- PM5 [Moderate, +2]: Novel missense change at an amino acid residue where a different missense pathogenic variant has been documented.
+- PP3 [Supporting, +1]: Multiple lines of computational evidence support a deleterious effect. Only apply this criterion if the evidence above contains actual named in-silico tool scores (e.g. REVEL, CADD, SIFT, PolyPhen-2, AlphaMissense, SpliceAI). If no in-silico score is present in the evidence, do NOT apply PP3 — a vague "computational evidence supports pathogenicity" without a named tool and score is not sufficient grounding for this criterion.
+  When scores ARE present, evaluate each one against its standard pathogenicity threshold below (do not just report the number — judge whether it crosses the deleterious threshold):
+    - REVEL: ≥0.7 supports deleterious; ≤0.3 supports benign; in between is inconclusive.
+    - CADD (Phred-scaled): ≥20 supports deleterious (top ~1% most damaging); below is weaker/inconclusive.
+    - SIFT: <0.05 supports deleterious ("damaging"); ≥0.05 supports tolerated/benign.
+    - PolyPhen-2: >0.85 supports deleterious ("probably damaging"); 0.15–0.85 possibly damaging/inconclusive; <0.15 supports benign.
+    - AlphaMissense: >0.564 supports deleterious ("likely pathogenic"); <0.34 supports benign ("likely benign"); in between is ambiguous.
+    - SpliceAI (delta score): ≥0.5 supports a splice-altering effect; <0.2 does not.
+  Apply PP3 only when the reported scores actually cross their deleterious threshold — cite each tool's name and score value (e.g. "REVEL=0.82, CADD=28.3") alongside the judgment. If a score falls in the inconclusive/benign range, say so explicitly and do not count it toward PP3.
+- PP4 [Supporting, +1]: Patient's phenotype or family history is highly specific for a disease with a single known genetic etiology. Only apply PP4 if the evidence indicates this disease/phenotype is caused by variants in ONE gene (not genetically heterogeneous — i.e. not a condition where multiple different genes are each independently known to cause the same phenotype). If the evidence shows or does not rule out genetic heterogeneity for this phenotype, do NOT apply PP4 — state the heterogeneity explicitly instead. Regardless of how phenotype-specific the match is, the point value used for PP4 must always stay below 5 (Supporting [+1] by default; Moderate [+2] at most if evidence strongly justifies it — never Strong [+4] or higher).
+- BA1 [Standalone Benign, -8]: Allele frequency > 5% in population databases.
+- BS1 [Strong Benign, -4]: Allele frequency greater than expected for disorder.
+- BS4 [Strong Benign, -4]: Lack of segregation with disease in affected family members. Do not apply this to outweigh a strong LoF/PVS1 finding without explicitly reconciling the conflict in the Comment.
+- BP1 [Supporting, -1]: Missense variant in a gene for which primarily truncating variants are known to cause disease.
+- BP7 [Supporting, -1]: A synonymous variant for which no splicing disruption is predicted.
+
+Evaluate each criterion based on the evidence in the context. Only list criteria that are supported by evidence or that can be ruled out with evidence.
+
+Classification thresholds (sum of applied points):
+- Pathogenic: ≥ 10
+- Likely Pathogenic: 6 to 9
+- Uncertain Significance (VUS): 0 to 5
+- Likely Benign: -1 to -6
+- Benign: ≤ -7

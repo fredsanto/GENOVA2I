@@ -1,0 +1,97 @@
+MOI-layer findings (ground truth — do not deviate from these), grouped by
+layer ("=== DE NOVO LAYER ===", "=== DOMINANT-INHERITED LAYER ===", "===
+RECESSIVE LAYER ===", "=== X-LINKED LAYER ===", "=== UNCLASSIFIED ==="). A
+RECESSIVE layer block is one of TWO kinds — check its title line first:
+  - "(compound heterozygous / biallelic)" — a PAIR of variants; embeds both
+    variants' own base conclusions verbatim plus its own backend-determined
+    "**Phase:**" line (computed in code BEFORE the block was generated — a
+    CIS pair never produces this kind of block at all, so the TRANS STATUS
+    CHECK below is defense-in-depth, not the primary safeguard).
+  - "(confirmed homozygous, biallelic)" — a SINGLE variant; embeds a
+    "**Zygosity:**" line instead, never a "**Phase:**" line. There is no
+    second variant to check phase against — homozygosity for this one
+    variant already satisfies the biallelic requirement on its own, by
+    definition. This kind of block is EXEMPT from the TRANS STATUS CHECK
+    below (it only applies to the two-variant kind) — never flag it as an
+    error for lacking a Phase line or for "unconfirmed" biallelic status.
+{conclusions}
+
+Draft clinical conclusion to check:
+{draft}
+
+TASK: Check the draft above against the MOI-layer findings for factual
+contradictions, then output a corrected version.
+
+Specifically check for:
+- Any ACMG criterion (PVS1, PS1-4, PM1-6, PP1-5, BA1, BS1-4, BP1-7...) named
+  in the draft that does NOT appear in the cited variant's own layer block
+  (or its embedded base conclusion).
+- Any ACMG classification or point total in the draft that does not exactly
+  match the "ACMG points:" / "Total ACMG points:" line in that variant's own
+  layer block.
+- Any inheritance/segregation claim (de novo, maternal/paternal, carrier
+  status) in the draft that conflicts with what that variant's own layer
+  block states.
+- Any other factual claim in the draft not traceable to the layer findings
+  above.
+- Two (or more) variants in the SAME gene, both with supporting evidence and
+  segregation consistent with biallelic inheritance (compound heterozygous),
+  that the draft frames as competing with each other (e.g. one "superior" or
+  "primary" over the other) instead of jointly causative. If found, rewrite
+  section 2 to list all such variants as co-causative, each preceded by its
+  gene name, per a compound-het/biallelic recessive model — do not keep a
+  single-winner framing for a gene with two qualifying trans variants.
+- TRANS STATUS CHECK (recessive genes only, MANDATORY — do this for every
+  gene the draft calls "compound heterozygous" or "biallelic" as a PAIR of
+  two distinct variants; do NOT run this for a gene whose RECESSIVE block is
+  the "(confirmed homozygous, biallelic)" single-variant kind — see above,
+  it is exempt and its biallelic status is already correct — even if
+  everything else about the draft looks correct):
+  Step A: if a RECESSIVE layer block exists for that gene, read its own
+  "**Phase:**" line first — this is the authoritative, already-verified
+  value. Only if no RECESSIVE block exists for that gene (the draft is
+  claiming compound-het without one), fall back to finding each variant's
+  Segregation/parental-origin line within its own embedded base conclusion
+  and copy them EXACTLY as written, e.g.:
+    Variant 1 Segregation: "inherited from mother"
+    Variant 2 Segregation: "inherited from mother"
+  Step B: compare the two parent-of-origin values as plain strings.
+    - Both say the same single parent (e.g. both "mother", or both
+      "father") → CIS. The draft's compound-het claim is WRONG — this is a
+      HARD ERROR, not a style issue, regardless of how strong the ACMG
+      evidence or gene-disease mechanism looks. Two variants inherited from
+      the same parent sit on one allele; the other parent's allele is
+      wild-type at both positions, so biallelic/recessive inheritance is
+      NOT satisfied.
+    - Different parents (one "mother", one "father") → TRANS. Compound-het
+      claim is correct, leave as-is.
+    - One or both are "de novo" / "unknown" / "no parental data" → phase
+      UNKNOWN. Compound-het claim may stand, but the draft must note the
+      phase uncertainty.
+  Step C: if Step B found CIS, rewrite section 2 to drop the compound-het/
+  biallelic framing for that gene — fall back to a single causative variant
+  (pick the one with the stronger ACMG classification) or state the gene
+  has insufficient biallelic evidence, per the per-variant conclusions. Also
+  fix section 3's summary sentence to match (remove "compound heterozygous"
+  wording for that gene).
+- SINGLE-HIT RECESSIVE CHECK (mandatory, do this for every gene the draft
+  lists as causative with only ONE variant, even if everything else about
+  the draft looks correct): find that gene's inheritance mode and this
+  variant's zygosity/compound-het status in its own per-variant conclusion.
+  If the gene is autosomal recessive (AR) or X-linked recessive (XLR), the
+  variant is heterozygous, and no second variant/trans partner is
+  documented for that gene — the draft's causative claim for this variant
+  is WRONG, regardless of how strong its ACMG evidence looks. Remove this
+  variant from section 2. If no causative variant remains after removal,
+  state explicitly that no confirmed causative variant was found under a
+  recessive model (insufficient evidence — single heterozygous hit only),
+  and fix section 3's summary sentence to match.
+
+If you find no contradictions, output the draft unchanged.
+If you find contradictions, output a corrected version with the same
+structure (# Reasoning, # Clinical Conclusion, same numbered sections) —
+fix only the incorrect claims, keep everything else as written.
+
+Output ONLY the final corrected text (# Reasoning ... # Clinical Conclusion
+...). Do not explain what you changed, do not add commentary before or
+after it.

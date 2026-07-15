@@ -1,0 +1,79 @@
+MOI LAYER: RECESSIVE / COMPOUND-HETEROZYGOUS ANALYSIS
+
+Gene: {gene}
+
+This gene has a recessive-relevant inheritance mode (AR, XLR, AD_AR, or
+XLD_XLR) with two candidate variants. The TRANS phase check below has
+ALREADY been computed and enforced in Python before this analysis ran — a
+CIS pair never reaches this stage at all. Do NOT re-evaluate or re-score
+anything already covered in either variant's BASE CONCLUSION (molecular
+mechanism, frequency, in-silico evidence, PVS1/PM1/PM2/PM5/PP3/PP4/BA1/BS1/
+BS4/BP1/BP7). This layer only ADDS the in-trans criterion (PM3) on top of
+each variant's base score.
+
+PHASE (backend-determined, mandatory hard gate already enforced — do not
+re-derive or second-guess): {phase_block}
+
+VARIANT A — {variant_a_label}
+BASE CONCLUSION (already scored — ground truth):
+{variant_a_base_conclusion}
+
+VARIANT B — {variant_b_label}
+BASE CONCLUSION (already scored — ground truth):
+{variant_b_base_conclusion}
+
+{cross_analysis_block}
+
+TASK:
+
+1. Both variants are jointly required to explain a recessive phenotype under
+   this model — they are CO-CAUSATIVE, not competing. Do not rank one as
+   "superior" to the other or pick a single "primary" variant.
+
+2. PM3 [Moderate, +2]: apply to a variant when its trans partner is itself at
+   least Likely Pathogenic per that partner's own BASE CONCLUSION classification
+   line. Check each variant's partner's classification explicitly before
+   applying PM3 to it — a partner that is only VUS or weaker does not support
+   PM3 for the other variant. It is possible for PM3 to apply to both, one, or
+   neither variant depending on each partner's own base classification.
+
+3. State explicitly what evidence is present (or absent) supporting the
+   parents as unaffected carriers — each parent transmitting one variant in
+   heterozygous state without being clinically affected themselves is the
+   expected recessive pattern. Do not invent this if the evidence is silent;
+   state "no parental phenotype data available" if so.
+
+Use exactly this format:
+
+# Recessive Analysis — {gene} (compound heterozygous / biallelic)
+**Phase:** [copy the backend-determined phase verbatim from above]
+**Parental carrier status:** [what evidence IS present about parents being unaffected carriers, or "no parental phenotype data available"]
+
+## Variant A — {variant_a_label}
+**Recessive criteria applied:** [PM3, if applicable, with justification citing Variant B's classification] [or "None — partner does not meet Likely Pathogenic threshold"]
+**Base ACMG criteria (copied verbatim from Variant A's BASE CONCLUSION own "ACMG criteria:" list — reproduce every line exactly as written there, do not summarize, drop, rename, or invent any):**
+- [Criterion] [Strength] (+/-N pts): [justification, copied verbatim]
+[repeat for every criterion listed in Variant A's BASE CONCLUSION]
+**Base ACMG points:** [copy the numeric value from Variant A's BASE CONCLUSION "ACMG points:" line verbatim]
+**Recessive delta:** [+2 / +0]
+**Total ACMG points:** [base + delta] → [classification from the thresholds below]
+
+## Variant B — {variant_b_label}
+**Recessive criteria applied:** [PM3, if applicable, with justification citing Variant A's classification] [or "None — partner does not meet Likely Pathogenic threshold"]
+**Base ACMG criteria (copied verbatim from Variant B's BASE CONCLUSION own "ACMG criteria:" list — reproduce every line exactly as written there, do not summarize, drop, rename, or invent any):**
+- [Criterion] [Strength] (+/-N pts): [justification, copied verbatim]
+[repeat for every criterion listed in Variant B's BASE CONCLUSION]
+**Base ACMG points:** [copy the numeric value from Variant B's BASE CONCLUSION "ACMG points:" line verbatim]
+**Recessive delta:** [+2 / +0]
+**Total ACMG points:** [base + delta] → [classification from the thresholds below]
+
+**Comment:** [2-3 sentences on the joint recessive mechanism — do not frame either variant as superior to the other]
+
+Classification thresholds (sum of applied points, same as base layer):
+- Pathogenic: ≥ 10
+- Likely Pathogenic: 6 to 9
+- Uncertain Significance (VUS): 0 to 5
+- Likely Benign: -1 to -6
+- Benign: ≤ -7
+
+CITATIONS ARE MANDATORY: every claim traceable to a source in either variant's base conclusion or context above (including citations already present there) MUST be cited/carried forward inline using (PMID:XXXXXXXX) or a bare URL. Do not write an uncited claim when its source is available above. Do not introduce new evidence not already present above.

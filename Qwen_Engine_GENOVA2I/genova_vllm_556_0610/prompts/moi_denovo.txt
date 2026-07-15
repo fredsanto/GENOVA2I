@@ -1,0 +1,70 @@
+MOI LAYER: DE NOVO ANALYSIS
+
+This variant's gene has a dominant-relevant inheritance mode (AD, AD_AR, or
+XLD). This layer checks specifically for DE NOVO occurrence — do NOT
+re-evaluate or re-score anything already covered in the BASE CONCLUSION below
+(molecular mechanism, frequency, in-silico evidence, PVS1/PM1/PM2/PM5/PP3/PP4/
+BA1/BS1/BS4/BP1/BP7). This layer only ADDS a de-novo-specific criterion on top
+of that base score.
+
+BASE CONCLUSION (already scored — ground truth, do not recompute):
+{base_conclusion}
+
+SEGREGATION (backend-determined from allelic balance — do not re-derive):
+{segregation_block}
+
+PARENTAL DATA STATUS (backend-determined): {parental_data_status}
+
+TASK:
+
+1. If PARENTAL DATA STATUS is "trio (both parents)" AND SEGREGATION above
+   states "de_novo": apply PS2 [Strong, +4] — confirmed de novo, both parents
+   tested and shown not to carry the variant. PS2 additionally requires the
+   variant to be rare (PM2). Check the BASE CONCLUSION's own ACMG criteria
+   list above for whether PM2 was applied there — if PM2 is NOT present in
+   the base criteria list, do NOT apply PS2 regardless of what SEGREGATION
+   says; state explicitly that de novo status alone does not substitute for
+   a frequency check.
+
+2. If PARENTAL DATA STATUS is "partial (one parent only)": de novo status
+   cannot be confirmed with a trio. If the available parent's data supports
+   the variant being absent in that parent (consistent with, but not proof
+   of, de novo), apply PM6 [Moderate, +2] — assumed de novo, without
+   confirmation of paternity/maternity or complete parental testing.
+
+3. If PARENTAL DATA STATUS is "none": de novo status CANNOT be assessed at
+   all. Do not apply PS2 or PM6. State this explicitly — this variant is
+   reported here as a pathogenic-per-base-ACMG candidate under this gene's
+   dominant-relevant mode, with de novo status simply unassessed, per the
+   base score alone.
+
+4. If SEGREGATION above does NOT state "de_novo" (e.g. it says "maternal",
+   "paternal", or "uncertain") even though trio data is present: this
+   variant is not de novo — do not apply PS2 or PM6 here. Note this
+   explicitly; this variant belongs in the dominant-inherited layer instead,
+   not this one.
+
+Use exactly this format:
+
+# De Novo Analysis — [GENE] ([HGVS])
+**Parental data:** [trio (both parents) / partial (one parent only) / none]
+**Segregation:** [copy the backend-determined value verbatim from above]
+**De novo criteria applied:**
+- [PS2 or PM6, if applicable, with strength/points and one-sentence justification]
+[or: "None — de novo status not confirmed / not assessable, see reasoning above"]
+**Base ACMG criteria (copied verbatim from BASE CONCLUSION's own "ACMG criteria:" list — reproduce every line exactly as written there, do not summarize, drop, rename, or invent any):**
+- [Criterion] [Strength] (+/-N pts): [justification, copied verbatim]
+[repeat for every criterion listed in BASE CONCLUSION]
+**Base ACMG points:** [copy the numeric value from BASE CONCLUSION's "ACMG points:" line verbatim]
+**De novo delta:** [+4 / +2 / +0]
+**Total ACMG points:** [base + delta] → [classification from the thresholds below]
+**Comment:** [1-2 sentences explaining the de novo determination]
+
+Classification thresholds (sum of applied points, same as base layer):
+- Pathogenic: ≥ 10
+- Likely Pathogenic: 6 to 9
+- Uncertain Significance (VUS): 0 to 5
+- Likely Benign: -1 to -6
+- Benign: ≤ -7
+
+CITATIONS ARE MANDATORY: every claim traceable to a source in the base conclusion or variant context above (including citations already present there) MUST be cited/carried forward inline using (PMID:XXXXXXXX) or a bare URL. Do not write an uncited claim when its source is available above. Do not introduce new evidence not already present in the base conclusion or variant context above.

@@ -1,0 +1,17 @@
+
+Gene: {gene}
+
+Two or more variants affect the same gene. Below are the individual variant contexts and per-variant reasonings.
+
+{variant_data}
+
+TASK — GENE-LEVEL CROSS-ANALYSIS:
+
+Evaluate whether these variants could act as compound heterozygous, have a modifier effect, or interact in any clinically relevant way. Consider zygosity, variant type, and the patient phenotype from the contexts above.
+
+If ALLELIC BALANCE data is available for any of these variants, use it to determine the allelic configuration (trans vs cis):
+- Two variants inherited from different parents (one maternal, one paternal) are in trans and support compound heterozygosity.
+- Two variants from the same parent (or both de novo) are likely in cis and do not constitute compound heterozygosity.
+- If one or both variants lack parental data, note the uncertainty in your phasing assessment.
+
+Provide a concise analysis (3–5 sentences). If the variants cannot meaningfully interact (e.g. both on the same allele, both dominant, insufficient evidence), state this clearly.

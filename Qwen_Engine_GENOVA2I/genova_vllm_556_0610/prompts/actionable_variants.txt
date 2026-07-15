@@ -1,0 +1,23 @@
+You are reporting ACMG Secondary Findings (SF v3.2) — pathogenic or likely
+pathogenic variants found incidentally in a fixed list of actionable genes
+(cancer predisposition, cardiac disease, metabolic disease, etc.), reported
+regardless of relevance to the patient's presenting phenotype and regardless
+of whether the variant occurs in the proband or was inherited from a parent.
+
+Patient phenotype (context only — these findings are NOT phenotype-driven):
+{patient_phenotype}
+
+Flagged variant(s):
+{variants}
+
+Write a short clinical paragraph (3-6 sentences) under the heading
+"# Actionable Variants" that:
+- Names each flagged gene/variant and its associated actionable condition.
+- States plainly that each finding is unrelated to the patient's primary
+  phenotype and is reported per ACMG secondary findings recommendations,
+  irrespective of proband/parental origin.
+- Recommends genetic counseling and appropriate clinical follow-up/referral
+  for each condition.
+
+Do not omit any listed variant. Do not invent additional variants or
+conditions beyond what is given. Do not restate the patient phenotype.

@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qwen Variant Analysis</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  header h1 { font-size: 1.25rem; font-weight: 600; }
+  header .badge {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #000;
+    font-weight: 600;
+  }
+  main {
+    flex: 1;
+    display: flex;
+    gap: 1.5rem;
+    padding: 1.5rem 2rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  @media (max-width: 900px) {
+    main { flex-direction: column; padding: 1rem; }
+  }
+
+  /* ── Input panel ── */
+  .input-panel {
+    flex: 0 0 400px;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  @media (max-width: 900px) {
+    .input-panel { flex: none; width: 100%; }
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .card h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+
+  /* ── Drop zone ── */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 6px;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(88,166,255,0.05);
+  }
+  .drop-zone .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .drop-zone .label { color: var(--muted); font-size: 0.85rem; }
+  .drop-zone .filename {
+    margin-top: 0.5rem;
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .drop-zone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  }
+
+  /* ── Phenotype textarea ── */
+  textarea {
+    width: 100%;
+    padding: 0.6rem;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 0.85rem;
+    resize: vertical;
+    min-height: 80px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea:focus { border-color: var(--accent); }
+
+  /* ── Submit ── */
+  button {
+    width: 100%;
+    padding: 0.7rem;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--font);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button.primary { background: var(--accent); color: #000; }
+  button.primary:hover { opacity: 0.9; }
+  button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary { background: var(--border); color: var(--text); }
+  button.secondary:hover { background: #3a404a; }
+
+  /* ── Status bar ── */
+  .status-bar {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+  }
+  .status-bar.idle { color: var(--muted); }
+  .status-bar.running { background: rgba(88,166,255,0.1); color: var(--accent); }
+  .status-bar.done { background: rgba(63,185,80,0.1); color: var(--green); }
+  .status-bar.error { background: rgba(248,81,73,0.1); color: var(--red); }
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--accent);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Results panel ── */
+  .results-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+  .results-panel .card { flex: 1; display: flex; flex-direction: column; }
+  #output {
+    flex: 1;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    padding: 0.75rem;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-height: 400px;
+    max-height: 80vh;
+    margin-top: 0.5rem;
+    font-family: var(--font);
+  }
+  #output .status-line { color: var(--muted); }
+  #output .stage-line { color: var(--accent); font-weight: 600; }
+  #output .error-line { color: var(--red); font-weight: 600; }
+  #output .result-line { color: var(--green); }
+
+  /* ── Progress info ── */
+  .progress-info {
+    display: flex; gap: 1rem; flex-wrap: wrap;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+  }
+  .progress-info .stat {
+    padding: 0.3rem 0.6rem;
+    background: #0d1117;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .progress-info .stat .val { color: var(--accent); font-weight: 600; }
+  .hidden { display: none; }
+
+  /* ── Activity panel ── */
+  .activity-card {
+    flex: 0 0 auto;
+  }
+  .activity-card h2 { margin-bottom: 0.5rem; }
+  .progress-bar-wrap {
+    background: var(--border);
+    border-radius: 4px;
+    height: 7px;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+  .progress-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 0.4rem;
+  }
+  #activityLog {
+    height: 120px;
+    overflow-y: auto;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-family: monospace;
+    font-size: 0.7rem;
+    line-height: 1.45;
+  }
+  #activityLog .log-info  { color: var(--muted); }
+  #activityLog .log-stage { color: var(--accent); }
+  #activityLog .log-warn  { color: var(--yellow); }
+  #activityLog .log-error { color: var(--red); }
+
+  /* ── Per-variant status table ── */
+  #variantTableWrap {
+    margin-top: 0;
+    margin-bottom: 0;
+    overflow-x: auto;
+  }
+  #variantTableWrap h2 { margin-bottom: 0.6rem; }
+  .variant-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+  .variant-table th {
+    padding: 0.3rem 0.6rem;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    text-align: left;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .variant-table td {
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .variant-table td.vt-idx  { color: var(--muted); text-align: center; font-size: 0.72rem; }
+  .variant-table td.vt-gene { font-weight: 700; color: var(--text); }
+  .variant-table td.vt-var  { color: var(--muted); font-size: 0.68rem; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .variant-table td.stage-pending  { color: var(--muted);  text-align: center; }
+  .variant-table td.stage-done     { color: var(--green);  text-align: center; font-size: 0.85rem; }
+  .variant-table td.stage-skipped  { color: var(--border); text-align: center; font-size: 0.72rem; }
+  .variant-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── Chat box ── */
+  .chat-panel {
+    margin-top: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .chat-panel h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    padding: 0.75rem 1rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .chat-history {
+    padding: 0.75rem 1rem;
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 60px;
+  }
+  .chat-bubble {
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    max-width: 90%;
+    white-space: pre-wrap;
+  }
+  .chat-bubble.user {
+    background: rgba(88,166,255,0.12);
+    border: 1px solid rgba(88,166,255,0.25);
+    color: var(--accent);
+    align-self: flex-end;
+  }
+  .chat-bubble.assistant {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    color: var(--text);
+    align-self: flex-start;
+  }
+  .chat-bubble.assistant.streaming { opacity: 0.85; }
+  .chat-input-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .chat-input-row textarea {
+    flex: 1;
+    min-height: 40px;
+    max-height: 120px;
+    resize: vertical;
+    font-size: 0.85rem;
+  }
+  .chat-input-row button {
+    width: auto;
+    padding: 0.5rem 1.1rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Qwen Variant Analysis</h1>
+  <span class="badge">LIVE</span>
+</header>
+
+<main>
+  <!-- Input panel -->
+  <div class="input-panel">
+    <div class="card">
+      <h2>1. Variants File</h2>
+      <div class="drop-zone" id="dropZone">
+        <div class="icon">&#128196;</div>
+        <div class="label">Drop CSV file here or click to browse</div>
+        <div class="filename" id="fileName"></div>
+        <input type="file" id="csvFile" accept=".csv,.xlsx">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. Patient Phenotype</h2>
+      <textarea id="phenotype" placeholder="e.g. Obesity, intellectual disability, hyperphagia"></textarea>
+    </div>
+
+    <button class="primary" id="submitBtn" disabled>Submit Analysis</button>
+    <button class="secondary hidden" id="stopBtn" style="background:#3a1a1a;color:var(--red);border:1px solid var(--red);">&#9632; Stop Job</button>
+
+    <div id="statusBar" class="status-bar idle">
+      <span id="statusText">Ready — upload a CSV and describe the phenotype</span>
+    </div>
+
+    <div id="progressInfo" class="progress-info hidden"></div>
+
+    <button class="secondary hidden" id="clearBtn">Clear &amp; New Analysis</button>
+  </div>
+
+  <!-- Results panel -->
+  <div class="results-panel">
+
+    <!-- Activity panel — visible while job runs -->
+    <div id="activityCard" class="card activity-card hidden" style="margin-bottom:0;">
+      <h2>Live Activity</h2>
+      <div id="variantProgressWrap" class="hidden">
+        <div class="progress-meta">
+          <span id="activityStage">processing...</span>
+          <span id="activityCount"></span>
+        </div>
+        <div class="progress-bar-wrap">
+          <div id="activityBar" class="progress-bar-fill"></div>
+        </div>
+      </div>
+      <div id="activityLog"></div>
+    </div>
+
+    <!-- Per-variant status table — built when variant list arrives -->
+    <div id="variantTableWrap" class="card hidden" style="margin-bottom:0;">
+      <h2>Variant-by-Variant Progress</h2>
+      <table class="variant-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Gene</th>
+            <th>Variant</th>
+            <th>Retrieval</th>
+            <th>Triage</th>
+            <th>Reasoning</th>
+            <th>Conclusion</th>
+          </tr>
+        </thead>
+        <tbody id="variantTableBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>3. Live Report</h2>
+      <div id="output"></div>
+    </div>
+
+    <!-- Chat box — shown after analysis completes -->
+    <div id="chatPanel" class="chat-panel hidden">
+      <h2>4. Ask a follow-up question</h2>
+      <div id="chatHistory" class="chat-history"></div>
+      <div class="chat-input-row">
+        <textarea id="chatInput" placeholder="e.g. What does the PM2 criterion mean here?" rows="2"></textarea>
+        <button id="chatClearBtn" type="button">Clear</button>
+        <button class="primary" id="chatSendBtn">Send</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const csvInput = document.getElementById('csvFile');
+const fileName = document.getElementById('fileName');
+const phenotype = document.getElementById('phenotype');
+const submitBtn = document.getElementById('submitBtn');
+const statusBar = document.getElementById('statusBar');
+const statusText = document.getElementById('statusText');
+const output = document.getElementById('output');
+const progressInfo = document.getElementById('progressInfo');
+const clearBtn = document.getElementById('clearBtn');
+const stopBtn = document.getElementById('stopBtn');
+
+let selectedFile = null;
+let eventSource = null;
+let activitySource = null;
+let jobId = null;
+
+// ── Job persistence across refresh ──
+function saveJob(id) { try { localStorage.setItem('sqwen_job_id', id); } catch(_) {} }
+function clearJob()  { try { localStorage.removeItem('sqwen_job_id'); } catch(_) {} }
+function loadJob()   { try { return localStorage.getItem('sqwen_job_id'); } catch(_) { return null; } }
+
+// ── Activity panel ──
+const activityCard        = document.getElementById('activityCard');
+const activityLog         = document.getElementById('activityLog');
+const variantProgressWrap = document.getElementById('variantProgressWrap');
+const activityBar         = document.getElementById('activityBar');
+const activityStage       = document.getElementById('activityStage');
+const activityCount       = document.getElementById('activityCount');
+
+// ── Variant table ──
+const variantTableWrap = document.getElementById('variantTableWrap');
+const variantTableBody = document.getElementById('variantTableBody');
+const STAGE_ORDER      = ['retrieval', 'triage', 'reasoning', 'conclusion'];
+
+function initVariantTable(variantList) {
+  variantTableBody.innerHTML = '';
+  variantTableWrap.classList.remove('hidden');
+  variantList.forEach(v => {
+    const tr = document.createElement('tr');
+    tr.id = `vrow-${v.idx}`;
+    tr.innerHTML = `
+      <td class="vt-idx">${v.idx}</td>
+      <td class="vt-gene">${v.gene || '?'}</td>
+      <td class="vt-var" title="${v.variant || ''}">${v.variant || ''}</td>
+      ${STAGE_ORDER.map(s => `<td id="vcell-${v.idx}-${s}" class="stage-pending" title="${s}">&#8212;</td>`).join('')}
+    `;
+    variantTableBody.appendChild(tr);
+  });
+}
+
+function markVariantStage(variantIdx, stage) {
+  if (!variantIdx || !stage) return;
+  const cell = document.getElementById(`vcell-${variantIdx}-${stage}`);
+  if (!cell) return;
+  cell.className = 'stage-done';
+  cell.textContent = '✓';
+  // Also mark all prior stages done if they're still pending
+  const sIdx = STAGE_ORDER.indexOf(stage);
+  STAGE_ORDER.slice(0, sIdx).forEach(s => {
+    const c = document.getElementById(`vcell-${variantIdx}-${s}`);
+    if (c && c.className === 'stage-pending') {
+      c.className = 'stage-done';
+      c.textContent = '✓';
+    }
+  });
+}
+
+function resetVariantTable() {
+  variantTableBody.innerHTML = '';
+  variantTableWrap.classList.add('hidden');
+}
+
+function startActivityStream(id) {
+  if (activitySource) activitySource.close();
+  activityCard.classList.remove('hidden');
+  activityLog.innerHTML = '';
+  variantProgressWrap.classList.add('hidden');
+  activityBar.style.width = '0%';
+
+  activitySource = new EventSource(`/activity/${id}`);
+  activitySource.onmessage = (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if (d.type === 'log') addActivityLine(d.line);
+      else if (d.type === 'done') activitySource.close();
+    } catch (_) {}
+  };
+  activitySource.onerror = () => {};
+}
+
+function addActivityLine(line) {
+  // variant X/Y progress
+  const vm = line.match(/variant\s+(\d+)\/(\d+)/i);
+  if (vm) {
+    const cur = parseInt(vm[1]), tot = parseInt(vm[2]);
+    variantProgressWrap.classList.remove('hidden');
+    activityBar.style.width = `${Math.round(cur / tot * 100)}%`;
+    activityCount.textContent = `${cur} / ${tot}`;
+  }
+  // stage label from log pattern [Stage] or [Pipeline]
+  const sm = line.match(/\[(Executor|Pipeline|Triage|Reasoning|Conclusion|FinalConclusion|WebSearchAgent)\]/i);
+  if (sm) activityStage.textContent = sm[1].toLowerCase();
+
+  const div = document.createElement('div');
+  const lower = line.toLowerCase();
+  if (lower.includes('[error]') || lower.includes('failed') || lower.includes('exception')) {
+    div.className = 'log-error';
+  } else if (lower.includes('[warning]') || lower.includes('429') || lower.includes('403') || lower.includes('warn')) {
+    div.className = 'log-warn';
+  } else if (lower.includes('[conclusion]') || lower.includes('[pipeline]') || lower.includes('[triage]') || lower.includes('[reasoning]') || lower.includes('[executor]')) {
+    div.className = 'log-stage';
+  } else {
+    div.className = 'log-info';
+  }
+  div.textContent = line;
+  activityLog.appendChild(div);
+
+  // auto-scroll only when near bottom
+  if (activityLog.scrollHeight - activityLog.scrollTop - activityLog.clientHeight < 60) {
+    activityLog.scrollTop = activityLog.scrollHeight;
+  }
+}
+
+function stopActivityStream() {
+  if (activitySource) { activitySource.close(); activitySource = null; }
+  activityCard.classList.add('hidden');
+  activityLog.innerHTML = '';
+  variantProgressWrap.classList.add('hidden');
+}
+
+// ── Drag & drop ──
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    selectedFile = e.dataTransfer.files[0];
+    updateFileUI();
+  }
+});
+csvInput.addEventListener('change', () => {
+  if (csvInput.files.length) {
+    selectedFile = csvInput.files[0];
+    updateFileUI();
+  }
+});
+function updateFileUI() {
+  fileName.textContent = selectedFile.name;
+  submitBtn.disabled = !selectedFile || !phenotype.value.trim();
+}
+phenotype.addEventListener('input', updateFileUI);
+
+// ── Submit / Stop ──
+submitBtn.addEventListener('click', submitJob);
+clearBtn.addEventListener('click', resetUI);
+stopBtn.addEventListener('click', stopJob);
+
+async function submitJob() {
+  if (!selectedFile || !phenotype.value.trim()) return;
+
+  setStatus('running', 'Submitting job...');
+  submitBtn.disabled = true;
+  output.innerHTML = '';
+  progressInfo.classList.add('hidden');
+
+  const form = new FormData();
+  form.append('csv_file', selectedFile);
+  form.append('patient_report', phenotype.value.trim());
+
+  try {
+    const resp = await fetch('/analyze', { method: 'POST', body: form });
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${err}`);
+    }
+    const data = await resp.json();
+    jobId = data.job_id;
+    saveJob(jobId);
+    appendLine('status-line', `[submitted] Job: ${jobId}`);
+    appendLine('status-line', `[stream]  ${data.stream_url}`);
+    stopBtn.classList.remove('hidden');
+    startSSE(jobId);
+    startActivityStream(jobId);
+  } catch (err) {
+    setStatus('error', `Submit failed: ${err.message}`);
+    submitBtn.disabled = false;
+  }
+}
+
+// ── SSE streaming ──
+function startSSE(id) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/stream/${id}`);
+
+  eventSource.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      handleEvent(data);
+    } catch (e) {
+      console.warn('SSE parse error:', e);
+    }
+  };
+
+  eventSource.onerror = () => {
+    // SSE will auto-reconnect; only show error if job likely finished
+    setTimeout(async () => {
+      const resp = await fetch(`/result/${id}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.status === 'done') {
+          setStatus('done', 'Analysis complete.');
+          if (data.result) {
+            output.innerHTML = '';
+            appendLine('result-line', data.result);
+          }
+          clearJob();
+          eventSource.close();
+          clearBtn.classList.remove('hidden');
+        }
+      }
+    }, 2000);
+  };
+}
+
+function handleEvent(data) {
+  switch (data.type) {
+    case 'status':
+      setStatus('running', data.message);
+      appendLine('status-line', `[info] ${data.message}`);
+      break;
+
+    case 'progress':
+      if (data.stage === 'normalized') {
+        progressInfo.classList.remove('hidden');
+        progressInfo.innerHTML = `
+          <span class="stat">Variants: <span class="val">${data.n_variants || '?'}</span></span>
+          <span class="stat">Stage: <span class="val">loading...</span></span>
+        `;
+        // Build per-variant table if the backend sent the list (direct mode)
+        if (data.variants && data.variants.length) {
+          initVariantTable(data.variants);
+        }
+      } else if (data.done != null && data.total != null) {
+        const pct = Math.round(data.done / data.total * 100);
+        variantProgressWrap.classList.remove('hidden');
+        activityCard.classList.remove('hidden');
+        activityStage.textContent = data.stage;
+        activityCount.textContent = `${data.done} / ${data.total}`;
+        activityBar.style.width = `${pct}%`;
+        progressInfo.classList.remove('hidden');
+        progressInfo.innerHTML = `
+          <span class="stat">Stage: <span class="val">${data.stage}</span></span>
+          <span class="stat">Progress: <span class="val">${data.done}/${data.total}</span></span>
+        `;
+        // Update the cell for the specific variant that just completed
+        if (data.variant_idx) {
+          markVariantStage(data.variant_idx, data.stage);
+          // Scroll that row into view inside the table
+          const row = document.getElementById(`vrow-${data.variant_idx}`);
+          if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }
+      appendLine('status-line', `[progress] ${data.message}`);
+      break;
+
+    case 'stage':
+      activityStage.textContent = data.stage;
+      appendLine('stage-line', `[${data.stage}] ${data.message}`);
+      break;
+
+    case 'result':
+      setStatus('done', 'Analysis complete!');
+      output.innerHTML = '';
+      appendLine('result-line', data.data);
+      stopBtn.classList.add('hidden');
+      clearBtn.classList.remove('hidden');
+      showChatPanel();
+      clearJob();
+      if (eventSource) eventSource.close();
+      break;
+
+    case 'cancelled':
+      setStatus('idle', 'Job stopped.');
+      appendLine('error-line', `[stopped] ${data.message}`);
+      submitBtn.disabled = false;
+      stopBtn.classList.add('hidden');
+      clearBtn.classList.remove('hidden');
+      clearJob();
+      if (eventSource) eventSource.close();
+      break;
+
+    case 'error':
+      setStatus('error', data.message);
+      appendLine('error-line', `[error] ${data.message}`);
+      submitBtn.disabled = false;
+      stopBtn.classList.add('hidden');
+      clearBtn.classList.remove('hidden');
+      clearJob();
+      if (eventSource) eventSource.close();
+      break;
+  }
+}
+
+// ── UI helpers ──
+function setStatus(type, msg) {
+  statusBar.className = `status-bar ${type}`;
+  statusText.innerHTML = type === 'running'
+    ? `<span class="spinner"></span> ${msg}`
+    : msg;
+}
+
+function appendLine(cls, text) {
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = text;
+  output.appendChild(div);
+  output.scrollTop = output.scrollHeight;
+}
+
+async function stopJob() {
+  if (!jobId) return;
+  stopBtn.disabled = true;
+  try {
+    await fetch(`/cancel/${jobId}`, { method: 'POST' });
+  } catch (e) {
+    console.warn('Cancel request failed:', e);
+  }
+  stopBtn.disabled = false;
+}
+
+function resetUI() {
+  if (eventSource) eventSource.close();
+  eventSource = null;
+  stopActivityStream();
+  resetVariantTable();
+  clearJob();
+  jobId = null;
+  selectedFile = null;
+  csvInput.value = '';
+  fileName.textContent = '';
+  phenotype.value = '';
+  output.innerHTML = '';
+  progressInfo.classList.add('hidden');
+  stopBtn.classList.add('hidden');
+  clearBtn.classList.add('hidden');
+  submitBtn.disabled = true;
+  setStatus('idle', 'Ready — upload a CSV and describe the phenotype');
+  chatPanel.classList.add('hidden');
+  chatHistory.innerHTML = '';
+  chatInput.value = '';
+}
+
+// ── Chat ──
+const chatPanel = document.getElementById('chatPanel');
+const chatHistory = document.getElementById('chatHistory');
+const chatInput = document.getElementById('chatInput');
+const chatSendBtn = document.getElementById('chatSendBtn');
+const chatClearBtn = document.getElementById('chatClearBtn');
+
+function showChatPanel() {
+  chatPanel.classList.remove('hidden');
+}
+
+chatSendBtn.addEventListener('click', sendChat);
+chatClearBtn.addEventListener('click', () => {
+  chatInput.value = '';
+  chatInput.focus();
+});
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+});
+
+async function sendChat() {
+  const question = chatInput.value.trim();
+  if (!question || !jobId) return;
+
+  chatInput.value = '';
+  chatSendBtn.disabled = true;
+
+  // User bubble
+  const userBubble = document.createElement('div');
+  userBubble.className = 'chat-bubble user';
+  userBubble.textContent = question;
+  chatHistory.appendChild(userBubble);
+  chatHistory.scrollTop = chatHistory.scrollHeight;
+
+  // Assistant bubble (streaming)
+  const asstBubble = document.createElement('div');
+  asstBubble.className = 'chat-bubble assistant streaming';
+  asstBubble.textContent = '';
+  chatHistory.appendChild(asstBubble);
+
+  try {
+    const resp = await fetch(`/chat/${jobId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+
+    if (!resp.ok) {
+      asstBubble.textContent = `Error: HTTP ${resp.status}`;
+      asstBubble.classList.remove('streaming');
+      chatSendBtn.disabled = false;
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const chunk = line.slice(6);
+        try {
+          const data = JSON.parse(chunk);
+          if (data.type === 'token') {
+            asstBubble.textContent += data.text;
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+          } else if (data.type === 'done') {
+            asstBubble.classList.remove('streaming');
+          } else if (data.type === 'error') {
+            asstBubble.textContent = `Error: ${data.message}`;
+            asstBubble.classList.remove('streaming');
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (err) {
+    asstBubble.textContent = `Error: ${err.message}`;
+  }
+
+  asstBubble.classList.remove('streaming');
+  chatSendBtn.disabled = false;
+  chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+
+// ── Restore job on page load ──
+(async function restoreJob() {
+  const saved = loadJob();
+  if (!saved) return;
+  try {
+    const resp = await fetch(`/result/${saved}`);
+    if (!resp.ok) { clearJob(); return; }
+    const data = await resp.json();
+    if (data.status === 'done') {
+      jobId = saved;
+      setStatus('done', 'Analysis complete (restored).');
+      if (data.result) appendLine('result-line', data.result);
+      clearBtn.classList.remove('hidden');
+      showChatPanel();
+      clearJob();
+    } else if (data.status === 'running' || data.status === 'pending') {
+      jobId = saved;
+      setStatus('running', `Reconnecting to job ${saved}…`);
+      appendLine('status-line', `[restored] Job: ${saved}`);
+      stopBtn.classList.remove('hidden');
+      startSSE(saved);
+      startActivityStream(saved);
+    } else {
+      clearJob();
+    }
+  } catch (_) { clearJob(); }
+})();
+</script>
+</body>
+</html>

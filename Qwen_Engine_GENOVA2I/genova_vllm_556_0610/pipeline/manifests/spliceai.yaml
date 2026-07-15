@@ -1,0 +1,25 @@
+name: spliceai
+description: "Fetches SpliceAI delta scores from the Broad Institute API for splice impact prediction."
+enabled: true
+
+order: 1
+parallel: true
+
+# Python gate() runs first; this manifest gate is only reached if Python gate passes.
+# Skips the API call when pre-computed SpliceAI scores are already in the input CSV.
+# For hg19 format: SpliceAI_v13 is never present → raw_na=True → tool runs.
+# For ANNOVAR/hg38 format: SpliceAI_v13 is present → tool is skipped.
+gate:
+  field: SpliceAI_v13
+  operator: raw_na
+
+compress:
+  enabled: true
+  threshold: 20
+  strategy: slm
+  max_tokens: 350
+
+timeout: 60
+retry:
+  attempts: 2
+  backoff: 3.0

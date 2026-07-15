@@ -1,0 +1,92 @@
+"""
+pipeline/stages/conclusion.py — SLM structured report stage.
+
+Ported from run_conclusion() in server_main.py.
+
+Single SLM call per variant. Takes one variant's context string, its reasoning
+output, and an optional gene-level cross-analysis text, then produces the
+structured clinical block for that variant.
+
+The Clinical Conclusion paragraph (overall synthesis across all variants) is
+generated separately by stages/final_conclusion.py.
+
+Prompt loaded from prompts/conclusion.txt.
+
+Public API:
+    run_one(variant_context, reasoning, cross_analysis, llm) -> str
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from pipeline.core.citations import validate_citations
+
+if TYPE_CHECKING:
+    from pipeline.llm.base import LLMClient
+
+logger = logging.getLogger(__name__)
+
+_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "conclusion.txt"
+
+MAX_NEW_TOKENS_REPORT = 1500
+
+
+def _load_prompt() -> str:
+    if _PROMPT_PATH.exists():
+        return _PROMPT_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        f"Conclusion prompt not found at {_PROMPT_PATH}. "
+        "Run step 19 to extract prompts from server_main.py."
+    )
+
+
+def run_one(
+    variant_context: str,
+    reasoning: str,
+    cross_analysis: str | None,
+    llm: "LLMClient",
+) -> str:
+    """
+    Stage 4 — Structured clinical report for one variant.
+
+    Args:
+        variant_context: Per-variant context string from Stage 1 (retrieval).
+                         Contains PATIENT DATA header + one VARIANT block with tool outputs.
+        reasoning:       Output from reasoning.run_one() for this variant.
+        cross_analysis:  Gene-level cross-analysis text from cross_analysis.run(), or None
+                         if this variant's gene has fewer than two variants in this run.
+        llm:             Shared LLMClient instance.
+
+    Returns:
+        Structured report block for this variant:
+            # Variant [N] — [GENE] ([HGVS])
+            **Molecular mechanism:** ...
+            **Phenotype fit:** ...
+            **Inheritance check:** ...
+            **Evidence strength:** ...
+            **ACMG criteria**: ...
+            **Comment:** ...
+    """
+    logger.info("[Conclusion] Generating structured report for variant...")
+
+    template = _load_prompt()
+
+    cross_analysis_block = (
+        f"GENE-LEVEL CROSS-ANALYSIS:\n{cross_analysis}\n"
+        if cross_analysis is not None else ""
+    )
+
+    user_prompt = (template
+        .replace("{augmented_context}", variant_context)
+        .replace("{reasoning_output}", reasoning)
+        .replace("{cross_analysis_block}", cross_analysis_block))
+
+    result = llm.generate(
+        system="You are an expert clinical geneticist. Limit your response to 1000 words maximum.",
+        user=user_prompt,
+        max_tokens=MAX_NEW_TOKENS_REPORT,
+    )
+    return validate_citations(result, variant_context)

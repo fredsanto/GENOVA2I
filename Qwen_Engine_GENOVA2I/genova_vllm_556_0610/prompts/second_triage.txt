@@ -1,0 +1,128 @@
+
+The following reasoning has been produced for a genetic variant found in a patient.
+
+--- VARIANT EVIDENCE ---
+{augmented_context}
+
+--- CLINICAL REASONING ---
+{reasoning}
+{sibling_context_block}
+TASK — INCLUSION DECISION:
+
+Decide whether this variant should proceed to the final clinical conclusion.
+INCLUDE only variants with real clinical significance: a clear gene-phenotype link
+AND probable pathogenicity. Both criteria must be supported by evidence.
+Variants included here appear in the final clinical report — be selective.
+
+INCLUDE requires evidence for BOTH:
+
+1. GENE-PHENOTYPE LINK — the gene is known or strongly suspected to cause the
+   patient's phenotype:
+   - Gene reported in literature or OMIM for this phenotype or a phenotypically
+     overlapping condition, OR
+   - ClinVar entries for this gene list the patient's disease as associated condition.
+
+2. PROBABLE PATHOGENICITY — the variant itself is likely damaging:
+   - ClinVar Pathogenic or Likely pathogenic, OR
+   - Strong ACMG criterion applies (PVS1, PS1, PS3, or equivalent), OR
+   - Variant is rare (AF < 0.1%) with predicted functional impact (LoF, splice
+     disruption, or high CADD score ≥ 20) — ZYGOSITY MUST MATCH INHERITANCE MODE:
+     for a known AUTOSOMAL RECESSIVE gene, a single heterozygous LoF variant with
+     no second hit (no compound het, not homozygous) is INSUFFICIENT on its own —
+     treat as weak evidence, not strong, OR
+   - Variant is homozygous, or compound heterozygous with a second variant in the
+     same gene, in a known recessive gene with low population frequency, OR
+   - Confirmed or assumed DE NOVO (PS2/PM6 — AB data shows absent in both parents,
+     or one parent untested) in a gene relevant to the phenotype is a STRONG
+     pathogenicity signal, regardless of variant type (missense, LoF, etc.) — rank
+     this above an unresolved single het LoF in a recessive gene — BUT only if the
+     variant is ALSO rare (AF < 0.1%). De novo status does not override frequency:
+     a de novo call on a common variant is not a valid de novo pathogenic signal
+     (likely artifact or AB misread) and must not be INCLUDEd on that basis alone, OR
+   - Variant or position reported as disease-causing in literature.
+
+   Note: "no functional study" does NOT equal no pathogenicity support. Rarity,
+   high CADD, homozygosity, confirmed de novo status, and strong gene-disease link
+   are all positive signals even when no wet-lab data exists for this specific variant.
+
+EXCEPTION — Compound heterozygous candidates (autosomal recessive / AD-AR genes only):
+   If two or more variants are present in the same gene in this patient, INCLUDE
+   if criterion 1 is met, even when individual variant pathogenicity evidence is limited.
+   If ALLELIC BALANCE data confirms the variants are in trans (inherited from different
+   parents), this strengthens the compound heterozygous case significantly.
+
+   If a "SIBLING VARIANT" block is present below, this gene has an inheritance mode
+   that is autosomal recessive (or AD/AR) AND another kept variant exists in the same
+   gene — the pipeline has already restricted this block to that situation, so treat
+   its presence as confirmation the compound-het scenario applies here.
+   - Do NOT EXCLUDE this variant solely because its own individual evidence looks
+     weak, IF the sibling variant's evidence (per the sibling's reasoning below) is
+     NOT clearly benign — i.e. the sibling is ClinVar Pathogenic/Likely pathogenic/VUS,
+     or has no ClinVar entry but is rare with plausible functional impact. Evaluate the
+     pair together: two variants in trans in a recessive gene, each individually modest,
+     can jointly explain a recessive phenotype.
+   - This safeguard does NOT apply, and normal EXCLUDE criteria still govern, if THIS
+     variant itself is clearly benign (ClinVar Benign/Likely benign, common AF > 1%,
+     no functional impact) — a sibling's status never rescues a variant that is
+     independently benign.
+   - If phase (cis vs trans) is not confirmed by ALLELIC BALANCE data, do not assume
+     cis (same-parent, non-compound) — treat phase as unknown/possibly-trans and still
+     apply this safeguard, but note the phase uncertainty in the Include-case reason.
+   - HARD RULE — if ALLELIC BALANCE data CONFIRMS both variants were inherited from
+     the SAME parent (cis, same allele), this is NOT compound heterozygous — only one
+     parental allele carries a variant, the other parental allele is wild-type at both
+     positions, so a biallelic/recessive model is NOT satisfied. This safeguard does
+     NOT apply in that case; fall back to normal single-heterozygous-in-AR-gene
+     criteria for THIS variant (EXCLUDE unless a true second trans hit, homozygosity,
+     or independent dominant-mechanism evidence exists).
+
+EXCLUDE if:
+   - Gene-phenotype link is absent or only speculative (no literature, no OMIM
+     association, no ClinVar disease entries for this phenotype), OR
+   - Pathogenicity evidence is truly absent: variant is common (AF > 1%), CADD low,
+     no LoF mechanism, ClinVar Benign or Likely benign with no conflicting evidence, OR
+   - Single heterozygous variant (any consequence) in a known AUTOSOMAL RECESSIVE
+     gene with no second hit and no compound-het evidence — insufficient for
+     disease causation under a recessive model, OR
+   - Proband allelic balance ≤ 0.2 with no other strong independent evidence
+     (ClinVar Pathogenic/Likely pathogenic, confirmed second hit) — treat as an
+     unconfirmed/low-confidence call, not sufficient grounds for INCLUDE.
+
+Important: missing tool results (failed retrieval, no rsID, no LitVar hits) do NOT
+by themselves justify EXCLUDE. Evaluate the variant-level signals that ARE present
+(frequency, CADD, zygosity, gene-disease association) before deciding.
+
+Output exactly three lines and nothing else:
+Include-case: <strongest reason to include, ≤15 words>
+Exclude-case: <strongest reason to exclude, ≤15 words>
+Decision: INCLUDE or EXCLUDE
+
+Example output (strong case — known gene, LoF):
+Include-case: OMIM gene for phenotype; PVS1 VeryStrong nonsense variant
+Exclude-case: no variant-level functional data beyond prediction
+Decision: INCLUDE
+
+Example output (included — VUS but strong signals):
+Include-case: known LCA gene; homozygous VUS, very low AF, high CADD
+Exclude-case: ClinVar VUS, no functional study for this specific variant
+Decision: INCLUDE
+
+Example output (included — de novo missense outranks unresolved recessive het):
+Include-case: confirmed de novo missense (PS2), gene matches phenotype exactly
+Exclude-case: no ClinVar entry, prediction-only evidence
+Decision: INCLUDE
+
+Example output (excluded — single het LoF in recessive gene, no second hit):
+Include-case: rare LoF variant, CADD 32
+Exclude-case: heterozygous only in AR gene, no second variant, no compound-het evidence
+Decision: EXCLUDE
+
+Example output (excluded — missing gene link):
+Include-case: variant rare and predicted damaging by CADD
+Exclude-case: no gene-disease link for this phenotype; gene unrelated
+Decision: EXCLUDE
+
+Example output (excluded — common variant, no signal):
+Include-case: gene has some OMIM disease association
+Exclude-case: AF 3%, CADD 8, ClinVar Benign, no LoF mechanism
+Decision: EXCLUDE

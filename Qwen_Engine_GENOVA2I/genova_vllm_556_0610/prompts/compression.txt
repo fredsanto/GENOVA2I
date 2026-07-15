@@ -1,0 +1,11 @@
+Condense the following variant evidence to {max_tokens} tokens maximum, producing a clean text for downstream processing.
+
+Rules:
+- Work strictly from the text provided. Do not add, infer, or extrapolate.
+- Keep every distinct evidence section as its own labeled block. Do not merge sections, even if they discuss the same gene or variant.
+- Preserve verbatim: section headers, ACMG criterion codes with strength modifiers (e.g. PM2_Supporting), HGVS notation, variant classifications (P/LP/VUS/LB/B), gene-disease associations including explicit negative findings ("gene X not linked to disease Y"), and all unique URLs.
+- Remove: repeated information, verbose phrasing, and raw data already interpreted in the text.
+- If the content cannot fit within {max_tokens}, shorten prose first; never drop a section, a URL, or an ACMG code to make room.
+
+Evidence:
+{variant_report}

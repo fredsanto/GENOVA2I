@@ -1,0 +1,28 @@
+
+PATIENT PHENOTYPE:
+{patient_report}
+
+VARIANT DATA:
+{variant}
+{prior_evidence_block}
+TASK:
+
+PubMed literature for this gene and phenotype has already been retrieved by prior tools
+(see pre-fetched evidence block). Do NOT repeat general gene-disease PubMed searches.
+
+Search specifically for complementary evidence not covered by prior tools:
+1. OMIM or GeneReviews page for this gene — gene function, disease mechanism, allelic variants
+2. Full ClinVar record for this variant — use the HGVS notation (e.g. "CYP21A2 c.292+5G>A ClinVar") NOT the rsID
+3. Recent preprints (bioRxiv, medRxiv) or clinical studies not yet in PubMed — search by gene + HGVS change
+4. Functional or experimental data for this specific variant or protein position
+
+IMPORTANT: When searching for a specific variant, always use the HGVS notation (gene + c.xxx or p.xxx)
+from the VARIANT DATA above. Do NOT use rsIDs — they return poor web search results.
+
+Use web_search to locate sources, then web_fetch or ncbi_fetch to read the most relevant ones.
+Limit to 3 focused searches. Stop as soon as the key gaps above are filled.
+
+Output format:
+- One bullet per finding, 1-2 sentences max
+- Include the full URL for each source
+- State clearly if a source was not found or returned no relevant data

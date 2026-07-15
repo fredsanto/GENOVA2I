@@ -1,0 +1,203 @@
+"""
+pipeline/core/acmg_sf.py — ACMG Secondary Findings (SF v3.2) actionable-gene detection.
+
+Source: https://www.ncbi.nlm.nih.gov/clinvar/docs/acmg/ (ACMG SF v3.2, 81 genes).
+
+Secondary findings are P/LP variants in a fixed list of genes with actionable
+implications (cancer predisposition, cardiac disease, metabolic disease, etc.)
+that must be reported regardless of relevance to the patient's presenting
+phenotype and regardless of which sample the variant was observed in — the
+recommendation is gene+classification driven, not phenotype- or
+proband/parent-driven, so detection here is deliberately independent of the
+MOI/phenotype-fit machinery elsewhere in the pipeline.
+
+Public API:
+    ACMG_SF_GENES                       — frozenset of gene symbols
+    ACMG_SF_CONDITIONS                  — {gene: condition string}
+    build_actionable_set(variants, litvar2_raw_by_variant, llm)
+        -> (set[int] actionable_indices, dict[int, str] reasons)
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pipeline.llm.base import LLMClient
+
+logger = logging.getLogger(__name__)
+
+# ACMG SF v3.2 (81 genes) — gene: associated actionable condition
+ACMG_SF_CONDITIONS: dict[str, str] = {
+    "APC":     "Adenomatous polyposis coli",
+    "MYH11":   "Familial thoracic aortic aneurysm 4",
+    "ACTA2":   "Familial thoracic aortic aneurysm 6",
+    "TMEM43":  "Arrhythmogenic right ventricular cardiomyopathy 5",
+    "DSP":     "ARVC type 8; dilated cardiomyopathy",
+    "PKP2":    "ARVC type 9",
+    "DSG2":    "ARVC type 10",
+    "DSC2":    "ARVC type 11",
+    "BTD":     "Biotinidase deficiency",
+    "BRCA1":   "Breast-ovarian cancer, familial 1",
+    "BRCA2":   "Breast-ovarian cancer, familial 2",
+    "SCN5A":   "Brugada syndrome; dilated cardiomyopathy; Long QT",
+    "RYR2":    "Catecholaminergic polymorphic ventricular tachycardia 1",
+    "CASQ2":   "CPVT 2",
+    "CALM1":   "CPVT 4; Long QT syndrome 14",
+    "TRDN":    "CPVT 5; Long QT syndrome",
+    "FLNC":    "Dilated cardiomyopathy; myofibrillar myopathy 5",
+    "LMNA":    "Dilated cardiomyopathy 1A",
+    "TNNT2":   "DCM 1D; familial hypertrophic cardiomyopathy 2",
+    "DES":     "DCM 1I; myofibrillar myopathy 1",
+    "MYH7":    "DCM 1S; familial hypertrophic cardiomyopathy 1",
+    "TNNC1":   "DCM 1Z",
+    "RBM20":   "DCM 1DD",
+    "BAG3":    "DCM 1HH; myofibrillar myopathy 6",
+    "TTN":     "Dilated cardiomyopathy (truncating variants only)",
+    "COL3A1":  "Ehlers-Danlos syndrome, type 4",
+    "GLA":     "Fabry disease",
+    "LDLR":    "Familial hypercholesterolemia 1",
+    "APOB":    "Familial hypercholesterolemia 2",
+    "TPM1":    "Familial hypertrophic cardiomyopathy 3",
+    "MYBPC3":  "Familial hypertrophic cardiomyopathy 4",
+    "PRKAG2":  "FHC 6",
+    "TNNI3":   "FHC 7",
+    "MYL3":    "FHC 8",
+    "MYL2":    "FHC 10",
+    "ACTC1":   "FHC 11",
+    "RET":     "Familial medullary thyroid carcinoma; MEN 2a; MEN 2b",
+    "PALB2":   "Hereditary breast cancer",
+    "HFE":     "Hereditary hemochromatosis (c.845G>A homozygotes)",
+    "ENG":     "Hereditary hemorrhagic telangiectasia type 1",
+    "ACVRL1":  "HHT type 2",
+    "SDHD":    "Hereditary paraganglioma-pheochromocytoma syndrome",
+    "SDHB":    "Hereditary paraganglioma-pheochromocytoma syndrome",
+    "TTR":     "Hereditary transthyretin-related amyloidosis",
+    "PCSK9":   "Hypercholesterolemia, autosomal dominant 3",
+    "BMPR1A":  "Juvenile polyposis syndrome",
+    "SMAD4":   "Juvenile polyposis; JPS/HHT syndrome",
+    "TP53":    "Li-Fraumeni syndrome 1",
+    "TGFBR1":  "Loeys-Dietz syndrome type 1A",
+    "TGFBR2":  "Loeys-Dietz syndrome type 1B",
+    "SMAD3":   "Loeys-Dietz syndrome type 3",
+    "KCNQ1":   "Long QT syndrome 1",
+    "KCNH2":   "Long QT syndrome 2",
+    "CALM2":   "Long QT syndrome 15; CPVT",
+    "CALM3":   "Long QT syndrome 16; CPVT",
+    "MSH2":    "Lynch syndrome 1",
+    "MLH1":    "Lynch syndrome 2",
+    "PMS2":    "Lynch syndrome 4",
+    "MSH6":    "Lynch syndrome 5",
+    "RYR1":    "Malignant hyperthermia",
+    "CACNA1S": "Malignant hyperthermia",
+    "FBN1":    "Marfan syndrome",
+    "HNF1A":   "Maturity-Onset Diabetes of the Young",
+    "MEN1":    "Multiple endocrine neoplasia, type 1",
+    "MUTYH":   "MYH-associated polyposis",
+    "NF2":     "Neurofibromatosis, type 2",
+    "OTC":     "Ornithine carbamoyltransferase deficiency",
+    "SDHAF2":  "Paragangliomas 2",
+    "SDHC":    "Paragangliomas 3",
+    "STK11":   "Peutz-Jeghers syndrome",
+    "MAX":     "Pheochromocytoma",
+    "TMEM127": "Pheochromocytoma",
+    "GAA":     "Pompe disease",
+    "PTEN":    "PTEN hamartoma tumor syndrome",
+    "RB1":     "Retinoblastoma",
+    "RPE65":   "RPE65-related retinopathy",
+    "TSC1":    "Tuberous sclerosis 1",
+    "TSC2":    "Tuberous sclerosis 2",
+    "VHL":     "Von Hippel-Lindau syndrome",
+    "WT1":     "Wilms tumor",
+    "ATP7B":   "Wilson disease",
+}
+
+ACMG_SF_GENES: frozenset[str] = frozenset(ACMG_SF_CONDITIONS)
+
+# ClinVar_class substrings that rule out a pathogenic call even though they
+# may contain the substring "pathogenic" (e.g. "Conflicting interpretations
+# of pathogenicity").  Checked before the "pathogenic" substring match.
+_NON_PATHOGENIC_MARKERS = ("benign", "uncertain", "conflicting", "not provided", "risk factor")
+
+
+def is_pathogenic_clinvar(value: str | None) -> bool:
+    """True if a ClinVar_class field value reads as Pathogenic or Likely pathogenic."""
+    if not value:
+        return False
+    v = value.strip().lower()
+    if v in ("", "na"):
+        return False
+    if any(marker in v for marker in _NON_PATHOGENIC_MARKERS):
+        return False
+    return "pathogenic" in v
+
+
+def _slm_check_litvar2_pathogenic(gene: str, litvar2_text: str, llm: "LLMClient") -> bool:
+    """
+    Cheap fallback SLM call used only when ClinVar_class is unavailable/NA for a
+    variant in an ACMG SF gene: does the already-fetched litvar2 evidence for
+    this gene explicitly report a clinically classified P/LP variant (not just
+    a disease-associated gene in general)?
+    """
+    system = (
+        "You are a clinical genetics literature screener. "
+        "Answer with exactly one word: YES or NO."
+    )
+    user = (
+        f"Gene: {gene}\n\n"
+        f"Literature evidence:\n{litvar2_text[:6000]}\n\n"
+        "Does this evidence explicitly report a pathogenic or likely pathogenic "
+        "variant that has been clinically classified for this gene (not merely "
+        "that the gene is disease-associated in general)? Answer YES or NO."
+    )
+    try:
+        raw = llm.generate(system=system, user=user, max_tokens=5, temperature=0.0).strip().upper()
+    except Exception as exc:
+        logger.warning("[ACMG-SF] litvar2 P/LP fallback check failed for gene %s: %s", gene, exc)
+        return False
+    return raw.startswith("Y")
+
+
+def build_actionable_set(
+    variants: list[dict],
+    litvar2_raw_by_variant: dict[int, str | None],
+    llm: "LLMClient",
+) -> tuple[set[int], dict[int, str]]:
+    """
+    Identify variants that are ACMG SF actionable findings: gene is in the
+    ACMG SF v3.2 list AND the variant is P/LP (ClinVar_class field primary,
+    litvar2 evidence as fallback when ClinVar_class is NA/missing).
+
+    Returns (actionable_indices, reasons) where reasons[i] is a short string
+    describing why variant i was flagged, for use in triage-exemption
+    justifications and the Actionable Variants report section.
+    """
+    actionable_indices: set[int] = set()
+    reasons: dict[int, str] = {}
+
+    for i, variant in enumerate(variants):
+        gene = (variant.get("Gene") or "NA").strip()
+        if gene == "NA" or gene not in ACMG_SF_GENES:
+            continue
+
+        clinvar_class = variant.get("ClinVar_class", "NA")
+        if is_pathogenic_clinvar(clinvar_class):
+            actionable_indices.add(i)
+            reasons[i] = f"ClinVar_class={clinvar_class}"
+            logger.info(
+                "[ACMG-SF] Variant %d (%s) flagged actionable via ClinVar_class=%s",
+                i + 1, gene, clinvar_class,
+            )
+            continue
+
+        litvar2_text = litvar2_raw_by_variant.get(i)
+        if litvar2_text and _slm_check_litvar2_pathogenic(gene, litvar2_text, llm):
+            actionable_indices.add(i)
+            reasons[i] = "P/LP variant reported for this gene in literature (LitVar2/PubMed evidence)"
+            logger.info(
+                "[ACMG-SF] Variant %d (%s) flagged actionable via litvar2 evidence fallback",
+                i + 1, gene,
+            )
+
+    return actionable_indices, reasons

@@ -1,0 +1,21 @@
+name: websearch_agent
+description: "ReAct agent that searches the web and NCBI for variant-phenotype evidence."
+enabled: true
+
+order: 3
+parallel: false
+
+# No gate — always runs. The agent uses pre-fetched evidence (LitVar2 / AutoPVS1)
+# from context.all_outputs to decide whether web search is even needed.
+
+compress:
+  enabled: true
+  threshold: 20
+  strategy: slm
+  max_tokens: 600
+
+# ReAct loop can be slow; allow more time
+timeout: 120
+retry:
+  attempts: 1
+  backoff: 0.0

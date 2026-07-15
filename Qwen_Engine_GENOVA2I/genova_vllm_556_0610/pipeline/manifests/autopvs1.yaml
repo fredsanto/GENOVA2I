@@ -1,0 +1,21 @@
+name: autopvs1
+description: "Fetches ACMG PVS1 criterion evaluation from AutoPVS1 for LoF variants (hg19)."
+enabled: true
+
+order: 2
+parallel: true
+
+# Gate is evaluated by AutoPVS1Tool.gate() (hybrid rule + LLM).
+# No manifest gate — Python method takes precedence per CLAUDE.md design rule.
+gate: ~
+
+compress:
+  enabled: true
+  threshold: 20
+  strategy: slm
+  max_tokens: 450
+
+timeout: 15
+retry:
+  attempts: 2
+  backoff: 2.0
