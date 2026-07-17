@@ -51,6 +51,29 @@ def _spliceai_rate_limit() -> None:
         _SPLICEAI_LAST_CALL_TIME = time.time()
 
 
+# Circuit breaker: the public SpliceAI-lookup API bans the caller's IP for an
+# "extended period" (undocumented duration) on the first 429 — it is not a
+# soft per-request throttle. Once tripped, every subsequent variant in this
+# process skips the network call entirely for _SPLICEAI_BREAKER_COOLDOWN
+# seconds instead of burning 4 retries x exponential backoff each, which
+# would otherwise stall all 32 workers for ~15s apiece against a ban that
+# retries cannot clear.
+_SPLICEAI_BREAKER_LOCK       = threading.Lock()
+_SPLICEAI_BREAKER_OPENED_AT  = 0.0
+_SPLICEAI_BREAKER_COOLDOWN   = 600.0  # seconds before retrying the API again
+
+
+def _breaker_is_open() -> bool:
+    with _SPLICEAI_BREAKER_LOCK:
+        return (time.time() - _SPLICEAI_BREAKER_OPENED_AT) < _SPLICEAI_BREAKER_COOLDOWN
+
+
+def _breaker_trip() -> None:
+    global _SPLICEAI_BREAKER_OPENED_AT
+    with _SPLICEAI_BREAKER_LOCK:
+        _SPLICEAI_BREAKER_OPENED_AT = time.time()
+
+
 SCORE_KEYS   = ["DS_AG", "DS_AL", "DS_DG", "DS_DL"]
 POS_KEYS     = ["DP_AG", "DP_AL", "DP_DG", "DP_DL"]
 SCORE_LABELS = {
@@ -149,6 +172,13 @@ def fetch_and_format_spliceai(
         return None
 
     variant_id = _build_variant_id(chrom, pos, ref, alt)
+
+    if _breaker_is_open():
+        raise ToolFetchError(
+            f"SpliceAI circuit breaker open (rate-limited by API earlier this run) — "
+            f"skipping {variant_id} without calling the API"
+        )
+
     hg_key     = "19" if hg in ("19", "37", "hg19", "hg37", "GRCh37") else "38"
     base_url   = SPLICEAI_API[hg_key]
     hg_param   = "37" if hg_key == "19" else "38"
@@ -164,18 +194,18 @@ def fetch_and_format_spliceai(
     print(f"[SpliceAI] Querying: {variant_id} (hg{hg_param})")
 
     try:
-        for attempt in range(4):
-            _spliceai_rate_limit()
-            r = requests.get(base_url, params=params, timeout=timeout)
-            if r.status_code == 429:
-                wait = 2.0 ** attempt   # 1s, 2s, 4s, 8s
-                print(f"[SpliceAI] 429 rate limit — backing off {wait:.0f}s (attempt {attempt + 1}/4)")
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            break
-        else:
-            raise requests.exceptions.RequestException(f"SpliceAI returned 429 after 4 attempts for {variant_id}")
+        _spliceai_rate_limit()
+        r = requests.get(base_url, params=params, timeout=timeout)
+        if r.status_code == 429:
+            # Not a soft per-request throttle — Broad's API bans the caller's
+            # IP outright ("loss of access ... for an extended period").
+            # Retrying with backoff cannot clear this, so trip the breaker
+            # immediately instead of burning 4 attempts.
+            _breaker_trip()
+            raise requests.exceptions.RequestException(
+                f"SpliceAI returned 429 (rate limit banned) for {variant_id} — circuit breaker tripped"
+            )
+        r.raise_for_status()
     except requests.exceptions.Timeout as e:
         raise ToolFetchError(f"SpliceAI request timed out for {variant_id}") from e
     except requests.exceptions.RequestException as e:

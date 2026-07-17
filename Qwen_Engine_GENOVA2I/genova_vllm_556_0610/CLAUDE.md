@@ -416,10 +416,15 @@ frameshift description). Only the MANE Select transcript is reported. Coordinate
 and genome build are sourced from the canonical variant dict fields; build is read
 from `pipeline/config.py` (`DEFAULT_GENOME_BUILD`). Gate is two-layer: Python gate
 skips synonymous, intergenic, UTR, and variants with unresolvable coordinates;
-manifest gate additionally skips the API call when a `SpliceAI_v13` column is
-already present in the input (pre-computed scores from ANNOVAR/hg38 format). Output
-labels are enriched for SLM readability (plain-English aberration names, explicit
-delta score scale).
+manifest gate additionally skips the API call when the canonical `SpliceAI_score`
+field is already populated — i.e. the SLM header-interpretation step (see
+`core/normalizer.py`) recognized a precomputed SpliceAI column in the input,
+regardless of its raw name (`SpliceAI_v13`, `spliceai_concat`, or any other
+annotation-tool naming). Compound annotation strings bundling multiple
+delta/position values (e.g. ANNOVAR-style pipe-delimited output) are collapsed
+to a single max delta score by `_parse_spliceai_value()` based on the value's
+shape, not the column's name. Output labels are enriched for SLM readability
+(plain-English aberration names, explicit delta score scale).
 
 **`websearch_agent`** runs a ReAct loop with three sub-tools (WebSearchTool,
 WebFetchTool, NCBIFetchTool). Before starting the loop, a pre-loop checkpoint prompt

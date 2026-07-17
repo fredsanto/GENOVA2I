@@ -170,6 +170,60 @@ def _normalize_type(raw: str) -> str:
     return _TYPE_MAP.get(raw.strip().lower(), raw)
 
 
+def _parse_spliceai_value(raw: str) -> str:
+    """
+    Collapse a compound splice-prediction annotation string down to a single
+    max score. Triggered by value shape, never by the source column's name —
+    works regardless of which annotation tool/plugin produced it or what its
+    header was called.
+
+    Two known fixed schemas are handled by position (same approach as
+    _parse_aachange() for ANNOVAR's AAChange column):
+      - SpliceAI plugin, 10 pipe-delimited fields:
+        ALLELE|SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL
+        Only indices 2-5 are 0-1 delta scores; 6-9 are integer genomic
+        offsets (can coincide with 0/1 and would otherwise look like a
+        plausible delta) — so a blind "any float in 0-1" scan is unsafe here.
+      - dbscSNV ada_score;rf_score pair — both already plain 0-1 scores.
+
+    Any other shape falls back to treating every ';'/'|'/','-delimited token
+    that parses as a 0-1 float as a candidate score. Leaves the value
+    untouched if it already looks like a plain scalar.
+    """
+    if not raw or raw in ("NA", ".", "", "nan"):
+        return raw
+
+    pipe_tokens = raw.split("|")
+    if len(pipe_tokens) == 10:
+        deltas = []
+        for t in pipe_tokens[2:6]:
+            try:
+                deltas.append(float(t.strip()))
+            except ValueError:
+                pass
+        if deltas:
+            return f"{max(deltas):.4f}"
+
+    tokens = re.split(r"[|,;]", raw)
+    if len(tokens) < 2:
+        return raw  # already a scalar
+
+    deltas = []
+    for t in tokens:
+        t = t.strip()
+        try:
+            f = float(t)
+        except ValueError:
+            continue
+        if 0.0 <= f <= 1.0:
+            deltas.append(f)
+
+    if len(deltas) < 2:
+        return raw  # not enough plausible scores — leave as-is
+
+    return f"{max(deltas):.4f}"
+
+
 def _parse_aachange(raw: str) -> str:
     """Extract a display HGVS string from ANNOVAR AAChange annotation."""
     if not raw or raw in ("NA", ".", "", "nan"):
@@ -271,7 +325,14 @@ _FIELD_DESCRIPTIONS = {
     "SIFT_score":          "SIFT score or prediction (damaging/tolerated)",
     "PolyPhen2_score":     "PolyPhen-2 score or prediction",
     "AlphaMissense_score": "AlphaMissense pathogenicity score",
-    "SpliceAI_score":      "SpliceAI delta score (splicing-impact prediction)",
+    "SpliceAI_score":      "precomputed splicing-impact prediction for this variant, from SpliceAI, dbscSNV "
+                           "(ada_score/rf_score ensemble prediction), or any similar splice-effect tool. May "
+                           "appear as a single score (e.g. \"0.87\"), a semicolon-pair (e.g. dbscSNV's "
+                           "\"0.999;0.685\"), OR a compound annotation string bundling several pipe/comma-"
+                           "delimited values together (allele, gene symbol, the four acceptor/donor gain/loss "
+                           "delta scores, plus positions, e.g. \"T|GENE|0.01|0.00|0.85|0.02|-2|33|1|-38\") — "
+                           "any of these compound forms is still a match for this field, whatever the column "
+                           "is named.",
 }
 
 _HEADER_INTERPRETATION_SYSTEM = (
@@ -422,6 +483,10 @@ def _build_normalized_df(df: pd.DataFrame, df_original: pd.DataFrame) -> pd.Data
     out["Type"] = out["Type"].apply(
         lambda v: _normalize_type(v) if v != "NA" else v
     )
+
+    # Collapse compound SpliceAI annotation strings (whatever the source
+    # column was named) down to a single max delta score
+    out["SpliceAI_score"] = out["SpliceAI_score"].apply(_parse_spliceai_value)
 
     return out
 

@@ -1,0 +1,15 @@
+name: clinvar_gene_stats
+description: "Fetches gene-level ClinVar P/LP counts split by missense vs. nonsense/frameshift, for PP2/BP1."
+enabled: true
+
+order: 1
+parallel: true
+
+gate:
+  field: Gene
+  operator: not_na
+
+timeout: 15
+retry:
+  attempts: 2
+  backoff: 2.0

@@ -6,12 +6,13 @@ order: 1
 parallel: true
 
 # Python gate() runs first; this manifest gate is only reached if Python gate passes.
-# Skips the API call when pre-computed SpliceAI scores are already in the input CSV.
-# For hg19 format: SpliceAI_v13 is never present → raw_na=True → tool runs.
-# For ANNOVAR/hg38 format: SpliceAI_v13 is present → tool is skipped.
+# Checks the canonical (SLM-mapped) field, not a hardcoded raw column name —
+# whatever the input CSV called its precomputed SpliceAI column (SpliceAI_v13,
+# spliceai_concat, ...), the header-interpretation SLM maps it to SpliceAI_score
+# if it recognizes it. Skip the live API call when that's already populated.
 gate:
-  field: SpliceAI_v13
-  operator: raw_na
+  field: SpliceAI_score
+  operator: not_na
 
 compress:
   enabled: true

@@ -48,7 +48,10 @@ from pipeline.core            import moi
 from pipeline.core            import segregation
 from pipeline.core            import acmg_sf
 from pipeline.llm.registry   import get_client
-from pipeline.tools          import AutoPVS1Tool, LitVar2SummaryTool, SpliceAITool, WebSearchAgentTool
+from pipeline.tools          import (
+    AutoPVS1Tool, LitVar2SummaryTool, SpliceAITool, WebSearchAgentTool,
+    GnomadConstraintTool, ClinVarGeneStatsTool,
+)
 from pipeline.stages         import (
     retrieval, reasoning, conclusion, cross_analysis, final_conclusion, first_triage,
     moi_denovo, moi_dominant, moi_recessive, moi_xlinked, actionable,
@@ -300,6 +303,8 @@ class Pipeline:
             SpliceAITool(),
             AutoPVS1Tool(),
             WebSearchAgentTool(),
+            GnomadConstraintTool(),
+            ClinVarGeneStatsTool(),
         ]
 
         # ── Executor ──────────────────────────────────────────────────────────

@@ -30,9 +30,7 @@ The server **cannot be accessed directly from outside the cluster**. All browser
 | File | Purpose |
 |------|---------|
 | `server_qwen.py` | Main FastAPI app — all routes, job management, SSE streaming, per-variant progress |
-| `launch_qwen.sh` | SLURM batch script — starts vLLM + ServerQwen on a GPU node |
-| `start_web.sh` | Quick launcher for proxy mode on the login node (dev/UI testing only) |
-| `daemon_web.py` | Python equivalent of `start_web.sh` |
+| `launch_qwen.sh` | SLURM batch script — starts vLLM + ServerQwen on a GPU node. **The only supported way to launch the server** |
 | `tunnel_qwen.sh` | Run on laptop — sets up SSH tunnel to the compute node |
 | `test_server.py` | Integration test suite |
 | `requirements.txt` | Python deps: `fastapi`, `uvicorn`, `httpx`, `python-multipart` |
@@ -52,7 +50,6 @@ The pipeline package and its conda env live **inside ServerQwen**, at `Qwen_Engi
 All paths are self-resolving, not hardcoded to a specific user/checkout location:
 - `launch_qwen.sh` derives its own directory from `$SLURM_SUBMIT_DIR` (falls back to `$(pwd)`)
 - `server_qwen.py` derives `_ERC_FOLDER` from its own file location (`Path(__file__).parent`)
-- `start_web.sh` derives its own directory from `${BASH_SOURCE[0]}`
 
 So the whole `ServerQwen/` folder can be relocated or checked out anywhere without editing any script.
 
@@ -241,38 +238,6 @@ bash tunnel_qwen.sh --node dnagpu003 --port 8002
 
 ```
 http://localhost:8002
-```
-
----
-
-## Running Locally (dev / UI testing — no GPU)
-
-Runs in proxy mode on the login node. The web UI and all API routes work. Jobs will fail at the pipeline step (no pipeline server running) — expected.
-
-```bash
-cd /work/PRTNR/CHUV/MED/fsantoni1/pitnet/AI/JING/GenMasterAI/ServerQwen
-bash start_web.sh
-```
-
-Or manually:
-
-```bash
-PIPELINE_BACKEND=proxy PIPELINE_SERVER_URL=http://localhost:8000 \
-  /work/PRTNR/CHUV/MED/fsantoni1/pitnet/AI/JING/GenMasterAI/.venv_qwen/bin/uvicorn \
-  server_qwen:app --host 0.0.0.0 --port 8002 --log-level info
-```
-
-Tunnel from laptop (server is on login node, not a compute node):
-
-```bash
-ssh -N -L 8002:localhost:8002 fsantoni1@curnagl.dcsr.unil.ch
-```
-
-Verify:
-
-```bash
-curl http://localhost:8002/health
-# → {"status":"ok","backend":"proxy",...}
 ```
 
 ---

@@ -1,0 +1,15 @@
+name: gnomad_constraint
+description: "Fetches gnomAD gene constraint metrics (pLI, LOEUF) for PVS1 mechanism plausibility."
+enabled: true
+
+order: 1
+parallel: true
+
+gate:
+  field: Gene
+  operator: not_na
+
+timeout: 15
+retry:
+  attempts: 2
+  backoff: 2.0
