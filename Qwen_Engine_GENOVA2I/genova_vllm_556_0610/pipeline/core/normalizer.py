@@ -376,6 +376,18 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
     # ── Deterministic pass: sample-specific allelic-balance columns ──────────
     _ab_pattern = re.compile(r"^allelic\s+balance\s*-", re.IGNORECASE)
     ab_found = False
+
+    # ── Deterministic pass: raw headers that already literally match a
+    # canonical field name (e.g. a "Frequency" or "Chromosome" column already
+    # named exactly that). Auto-claimed and excluded from the SLM pass —
+    # otherwise the SLM can independently map a *different* raw column onto
+    # the same canonical name (e.g. mapping "Frequency" <- "Alternate Allele
+    # Coverage" while the literal "Frequency" column sits untouched), leaving
+    # two columns both named "Frequency" after rename. pandas then raises
+    # "cannot reindex on an axis with duplicate labels" the first time
+    # anything downstream selects that column by name.
+    _target_by_lower = {f.lower(): f for f in TARGET_COLUMNS}
+
     llm_cols: list[str] = []
     for col in df.columns:
         if _ab_pattern.match(col):
@@ -383,6 +395,12 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
                 mapping[col] = "Allelic_balance"
                 claimed.add("Allelic_balance")
                 ab_found = True
+            continue
+        exact_field = _target_by_lower.get(col.strip().lower())
+        if exact_field and exact_field not in claimed:
+            if col != exact_field:
+                mapping[col] = exact_field
+            claimed.add(exact_field)
             continue
         llm_cols.append(col)
 
@@ -451,6 +469,18 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
 
     if mapping:
         df = df.rename(columns=mapping)
+
+    # Defense-in-depth: if a canonical target name still ended up duplicated
+    # (unforeseen collision beyond the exact-literal-match case handled
+    # above), keep the first occurrence and drop the rest rather than
+    # letting a bare pandas "cannot reindex on an axis with duplicate
+    # labels" surface downstream the first time that column is selected.
+    dupe_targets = {f for f in TARGET_COLUMNS if (df.columns == f).sum() > 1}
+    if dupe_targets:
+        print(f"[csv_normalizer] WARNING: duplicate columns after mapping, keeping first occurrence: {sorted(dupe_targets)}")
+        keep = ~df.columns.duplicated()
+        df = df.loc[:, keep]
+
     return df, summary
 
 
@@ -506,6 +536,24 @@ def _df_to_variant_dicts(df: pd.DataFrame) -> list[dict]:
 # Labels when 3 columns are present: proband, mother, father (fixed order)
 _PARENTAL_LABELS_3 = ["proband", "mother", "father"]
 
+_MOTHER_NAME_RE = re.compile(r"\b(mother|mom|maternal)\b", re.IGNORECASE)
+_FATHER_NAME_RE = re.compile(r"\b(father|dad|paternal)\b", re.IGNORECASE)
+
+
+def _parent_label_from_name(col: str) -> str | None:
+    """If a column name explicitly names the parent (e.g. "Allelic balance -
+    mother", "Allelic balance_mother", "Allelic balance (Father)"), return
+    "mother" or "father" — else None to fall back to positional convention.
+    Underscores/hyphens are normalised to spaces first — "_" is a \\w
+    character, so a \\b boundary never forms at "balance_mother"'s "e_m"
+    junction and a bare \\bmother\\b search silently fails to match there."""
+    normalized = re.sub(r"[_\-]+", " ", col)
+    if _MOTHER_NAME_RE.search(normalized):
+        return "mother"
+    if _FATHER_NAME_RE.search(normalized):
+        return "father"
+    return None
+
 
 def extract_parental_ab(df: pd.DataFrame) -> list[dict] | None:
     """
@@ -552,8 +600,15 @@ def extract_parental_ab(df: pd.DataFrame) -> list[dict] | None:
     elif n >= 3:
         labels = _PARENTAL_LABELS_3  # proband, mother, father
     else:
-        # 2 columns: proband + unlabeled
-        labels = ["proband", "extra1"]
+        # 2 columns: proband + second. If the second column's own name names
+        # its parent explicitly (e.g. "Allelic balance_mother"), use that
+        # label directly instead of the generic "extra1" — otherwise a
+        # correctly-present mother/father AB value is extracted but under a
+        # key (segregation.classify_segregation() etc. look for "mother"/
+        # "father" specifically) nothing downstream ever reads, which reads
+        # identically to that parent's data being absent.
+        second_label = _parent_label_from_name(ab_cols_ordered[1]) or "extra1"
+        labels = ["proband", second_label]
 
     result = []
     for _, row in df.iterrows():

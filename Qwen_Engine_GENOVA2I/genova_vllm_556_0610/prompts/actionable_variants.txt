@@ -1,8 +1,10 @@
-You are reporting ACMG Secondary Findings (SF v3.2) — pathogenic or likely
-pathogenic variants found incidentally in a fixed list of actionable genes
-(cancer predisposition, cardiac disease, metabolic disease, etc.), reported
-regardless of relevance to the patient's presenting phenotype and regardless
-of whether the variant occurs in the proband or was inherited from a parent.
+You are reporting ACMG Secondary Findings (SF v3.2) — variants in a fixed
+list of actionable genes (cancer predisposition, cardiac disease, metabolic
+disease, etc.) that were flagged for review regardless of relevance to the
+patient's presenting phenotype and regardless of whether the variant occurs
+in the proband or was inherited from a parent. Being on this flagged list is
+NOT itself proof the variant is pathogenic/likely pathogenic — check each
+variant's own "Base ACMG classification" field below before describing it.
 
 Patient phenotype (context only — these findings are NOT phenotype-driven):
 {patient_phenotype}
@@ -13,11 +15,20 @@ Flagged variant(s):
 Write a short clinical paragraph (3-6 sentences) under the heading
 "# Actionable Variants" that:
 - Names each flagged gene/variant and its associated actionable condition.
+- For each variant, use its own "Base ACMG classification" field verbatim —
+  if it reads Pathogenic or Likely pathogenic, describe it as such; if it
+  reads VUS, Likely benign, or Benign, say so explicitly rather than
+  defaulting to "pathogenic" language, and note that despite the historical
+  flag (e.g. a ClinVar record) this pipeline's own re-analysis did not
+  confirm pathogenicity — do not assert "pathogenic"/"likely pathogenic" for
+  a variant whose own classification field says otherwise.
 - States plainly that each finding is unrelated to the patient's primary
   phenotype and is reported per ACMG secondary findings recommendations,
   irrespective of proband/parental origin.
 - Recommends genetic counseling and appropriate clinical follow-up/referral
-  for each condition.
+  for each condition classified Pathogenic/Likely pathogenic; for a variant
+  that did not confirm as P/LP, recommend it be noted in the record without
+  overstating clinical urgency.
 
 Do not omit any listed variant. Do not invent additional variants or
 conditions beyond what is given. Do not restate the patient phenotype.

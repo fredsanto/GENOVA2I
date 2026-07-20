@@ -49,7 +49,19 @@ class ClinVarGeneStatsTool(NetworkTool):
 
     @staticmethod
     def _pathogenic_base(gene: str) -> str:
-        return f"{gene}[gene] AND (pathogenic[Properties] OR likely pathogenic[Properties])"
+        # ClinVar's Properties field indexes clinical significance as a
+        # "clinsig <value>" compound phrase, not the bare value — e.g.
+        # "clinsig pathogenic"[Properties], not pathogenic[Properties]. The
+        # latter returns esearch's "phrasesnotfound" and silently matches
+        # zero records for every gene (verified live: LDLR — one of the most
+        # heavily ClinVar-curated genes there is — returned 0/0 under the
+        # bare-value query). Similarly "nonsense variant"[molecular
+        # consequence] isn't an indexed phrase; the correct token is bare
+        # "nonsense".
+        return (
+            f'{gene}[gene] AND ("clinsig pathogenic"[Properties] '
+            f'OR "clinsig likely pathogenic"[Properties])'
+        )
 
     def _esearch_count(self, term: str) -> int:
         try:
@@ -64,10 +76,10 @@ class ClinVarGeneStatsTool(NetworkTool):
 
     def _fetch_stats(self, gene: str) -> dict:
         base = self._pathogenic_base(gene)
-        missense_term = f'{base} AND missense variant[molecular consequence]'
+        missense_term = f'{base} AND "missense variant"[molecular consequence]'
         nonsense_term = (
-            f'{base} AND (nonsense variant[molecular consequence] '
-            f'OR frameshift variant[molecular consequence])'
+            f'{base} AND (nonsense[molecular consequence] '
+            f'OR "frameshift variant"[molecular consequence])'
         )
         try:
             missense = self._esearch_count(missense_term)

@@ -133,23 +133,38 @@ def is_pathogenic_clinvar(value: str | None) -> bool:
     return "pathogenic" in v
 
 
-def _slm_check_litvar2_pathogenic(gene: str, litvar2_text: str, llm: "LLMClient") -> bool:
+def _slm_check_litvar2_pathogenic(gene: str, hgvs: str, litvar2_text: str, llm: "LLMClient") -> bool:
     """
     Cheap fallback SLM call used only when ClinVar_class is unavailable/NA for a
-    variant in an ACMG SF gene: does the already-fetched litvar2 evidence for
-    this gene explicitly report a clinically classified P/LP variant (not just
-    a disease-associated gene in general)?
+    variant in an ACMG SF gene: does the already-fetched litvar2 evidence
+    explicitly report THIS SPECIFIC VARIANT (matched by HGVS/position) as
+    clinically classified P/LP — not merely that the gene is disease-
+    associated, and not some OTHER classified variant in the same gene.
+
+    Gene-level literature for a well-studied ACMG SF gene will almost always
+    mention *some* known pathogenic variant as background context (e.g. APOB's
+    literature discusses the well-known R3500Q variant even when the variant
+    actually under review is an unrelated deep-intronic change) — without
+    pinning the check to this variant's own identity, that background mention
+    alone was enough to flag an unrelated variant as an incidental finding.
+    Same failure shape as citing a different variant's ClinVar record for PS1.
     """
     system = (
         "You are a clinical genetics literature screener. "
         "Answer with exactly one word: YES or NO."
     )
     user = (
-        f"Gene: {gene}\n\n"
+        f"Gene: {gene}\n"
+        f"Variant under review: {hgvs}\n\n"
         f"Literature evidence:\n{litvar2_text[:6000]}\n\n"
-        "Does this evidence explicitly report a pathogenic or likely pathogenic "
-        "variant that has been clinically classified for this gene (not merely "
-        "that the gene is disease-associated in general)? Answer YES or NO."
+        "Does this evidence explicitly report THIS SPECIFIC variant "
+        f"({hgvs}) — not a different variant in the same gene, and not the "
+        "gene in general — as clinically classified Pathogenic or Likely "
+        "pathogenic? A mention of some other named pathogenic variant in "
+        "this gene (e.g. a well-known founder/hotspot variant used as "
+        "background context) does NOT count unless it is this exact variant. "
+        "Answer YES only if the evidence ties a P/LP classification to this "
+        "variant's own position/HGVS/rsID. Answer YES or NO."
     )
     try:
         raw = llm.generate(system=system, user=user, max_tokens=5, temperature=0.0).strip().upper()
@@ -192,7 +207,8 @@ def build_actionable_set(
             continue
 
         litvar2_text = litvar2_raw_by_variant.get(i)
-        if litvar2_text and _slm_check_litvar2_pathogenic(gene, litvar2_text, llm):
+        hgvs = variant.get("HGVS") or variant.get("Variant") or "this variant"
+        if litvar2_text and _slm_check_litvar2_pathogenic(gene, hgvs, litvar2_text, llm):
             actionable_indices.add(i)
             reasons[i] = "P/LP variant reported for this gene in literature (LitVar2/PubMed evidence)"
             logger.info(

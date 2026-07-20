@@ -63,6 +63,17 @@ INCLUDE requires evidence for BOTH:
      variant is ALSO rare (AF < 0.1%). De novo status does not override frequency:
      a de novo call on a common variant is not a valid de novo pathogenic signal
      (likely artifact or AB misread) and must not be INCLUDEd on that basis alone, OR
+   - INHERITED FROM AN AFFECTED PARENT, in a gene with any dominant-relevant mode
+     (AD, AD_AR, XLD, XLD_XLR, or mode unknown/not yet excluded as dominant), is
+     JUST AS STRONG a pathogenicity signal as de novo — do not treat de novo as the
+     only acceptable positive segregation route. If ALLELIC BALANCE data or the
+     patient phenotype text indicates this variant was inherited from a parent
+     who is themselves affected/diagnosed with a phenotypically consistent
+     condition (e.g. "mother affected" alongside an AB pattern matching maternal
+     transmission), that is cosegregation with disease — a rare heterozygous
+     variant in a dominant-relevant gene, inherited from an affected parent, is
+     sufficient grounds for INCLUDE on its own; it does not additionally need to
+     be de novo, homozygous, or paired with a second hit, OR
    - Variant or position reported as disease-causing in literature.
 
    Note: "no functional study" does NOT equal no pathogenicity support. Rarity,
@@ -105,9 +116,15 @@ EXCLUDE if:
      association, no ClinVar disease entries for this phenotype), OR
    - Pathogenicity evidence is truly absent: variant is common (AF > 1%), CADD low,
      no LoF mechanism, ClinVar Benign or Likely benign with no conflicting evidence, OR
-   - Single heterozygous variant (any consequence) in a known AUTOSOMAL RECESSIVE
-     gene with no second hit and no compound-het evidence — insufficient for
-     disease causation under a recessive model, OR
+   - Single heterozygous variant (any consequence) in a gene whose ONLY reported
+     mode is AUTOSOMAL RECESSIVE (or XLR) — no dominant mechanism reported at
+     all — with no second hit and no compound-het evidence: insufficient for
+     disease causation under a purely recessive model. Do NOT apply this to a
+     gene reported as AD_AR, XLD_XLR, or otherwise dual/uncertain-mode — for
+     those, the heterozygous variant may still be sufficient under the AD
+     reading alone (see INHERITED FROM AN AFFECTED PARENT above), so evaluate
+     it as a potential dominant finding rather than excluding it on recessive
+     grounds just because the gene has also been reported as AR somewhere, OR
    - Proband allelic balance ≤ 0.2 with no other strong independent evidence
      (ClinVar Pathogenic/Likely pathogenic, confirmed second hit) — treat as an
      unconfirmed/low-confidence call, not sufficient grounds for INCLUDE.

@@ -689,7 +689,7 @@ class LitVar2SummaryTool(SLMTool):
             f"({self._disease_query}) OR disease OR {inheritance_terms}"
             if self._disease_query else f"disease OR {inheritance_terms}"
         )
-        pmids, total_count, query_translation = self._esearch_gene(
+        pmids, total_count, _ = self._esearch_gene(
             gene, disease_query, sort="pub_date"
         )
 
@@ -702,7 +702,7 @@ class LitVar2SummaryTool(SLMTool):
             )
             base = (
                 f"PubMed gene-disease search for {gene}\n"
-                f"[PubMed query: {query_translation} | {pool_note}{extra}]"
+                f"[{pool_note}{extra}]"
             )
             return base
 
@@ -721,7 +721,6 @@ class LitVar2SummaryTool(SLMTool):
             # disease term was dropped so downstream reasoning interprets accordingly.
             pmids = pmids_gene_only
             total_count = total_count_gene_only
-            query_translation = f"{gene} (disease term '{self._disease_query}' yielded no hits — gene-only search)"
 
             def _header(extra: str = "") -> str:  # noqa: F811 — shadow outer _header
                 pool_note = (
@@ -730,8 +729,9 @@ class LitVar2SummaryTool(SLMTool):
                     else f"{total_count} total"
                 )
                 return (
-                    f"PubMed gene-only evidence for {gene}\n"
-                    f"[PubMed query: {query_translation} | {pool_note}{extra}]"
+                    f"PubMed gene-only evidence for {gene} "
+                    f"(disease term '{self._disease_query}' yielded no hits — gene-only search)\n"
+                    f"[{pool_note}{extra}]"
                 )
 
         titles = self._fetch_titles(pmids)
@@ -766,8 +766,7 @@ class LitVar2SummaryTool(SLMTool):
         )
         return (
             f"PubMed gene-disease evidence for {gene}\n"
-            f"[PubMed query: {query_translation} | "
-            f"{len(titles)} screened, {len(papers)} selected]\n\n"
+            f"[{len(titles)} screened, {len(papers)} selected]\n\n"
             f"{summary}\n\n"
             f"Sources:\n{source_lines}"
         )
@@ -810,7 +809,7 @@ class LitVar2SummaryTool(SLMTool):
         disease_query = " OR ".join(f'"{_strip_subtype(c)}"' for c in capped)
 
         try:
-            pmids, _, query_translation = self._esearch_gene(gene, disease_query)
+            pmids, _, _ = self._esearch_gene(gene, disease_query)
         except PipelineError as e:
             logger.warning("Known-disease search failed for gene=%s (%s)", gene, e)
             return None
@@ -841,8 +840,7 @@ class LitVar2SummaryTool(SLMTool):
         )
         return (
             f"PubMed gene-disease evidence for {gene} (known condition, source: {source})\n"
-            f"[Query: {query_translation} | "
-            f"{len(titles)} screened, {len(papers)} selected | "
+            f"[{len(titles)} screened, {len(papers)} selected | "
             f"conditions: {'; '.join(capped)}]\n\n"
             f"{summary}\n\n"
             f"Sources:\n{source_lines}"
