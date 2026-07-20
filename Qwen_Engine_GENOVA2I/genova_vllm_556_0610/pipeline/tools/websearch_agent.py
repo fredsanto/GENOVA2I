@@ -459,30 +459,14 @@ class WebSearchAgentTool(ReActTool):
     def _last_trace(self, value: list[str]) -> None:
         self._tl.trace = value
 
-    def gate(self, variant: dict, context: "ToolContext") -> bool:
-        """
-        Skip websearch only on hard disqualifying signals from the variant dict.
-        Everything else passes through — the ReActAgent's pre-loop checkpoint
-        handles the 'is prefetched evidence already sufficient?' question, which
-        is the right place for that decision (it sees all prior tool outputs and
-        has a purpose-built prompt). No SLM call here.
-        """
-        # Hard skip: ClinVar benign / likely benign
-        clinvar = (variant.get("ClinVar_class") or "NA").strip()
-        if clinvar.lower() in {"benign", "likely benign"}:
-            self._last_gate_reason = f"ClinVar {clinvar} — web search not needed"
-            return False
-
-        # Hard skip: common variant (AF > 1%)
-        try:
-            freq = float(variant.get("Frequency") or 0)
-            if freq > 0.01:
-                self._last_gate_reason = f"common variant (AF={freq:.4f}) — web search not needed"
-                return False
-        except (ValueError, TypeError):
-            pass
-
-        return True
+    # No gate() override — always runs (inherits Tool.gate()'s default True).
+    # Previously hard-skipped ClinVar benign/likely-benign and common (AF > 1%)
+    # variants in Python before the ReAct loop ever started. Removed: that
+    # skip fired on the raw CSV ClinVar_class / Frequency fields alone, with
+    # no judgment call — the ReActAgent's pre-loop checkpoint already decides
+    # whether prefetched evidence is sufficient and web search is needed, and
+    # is the right place for this decision (it sees all prior tool outputs and
+    # has a purpose-built prompt), not a Python-side hard skip upstream of it.
 
     def run(self, variant: dict, context: ToolContext) -> str | None:
         """

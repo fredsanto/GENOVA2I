@@ -594,7 +594,13 @@ async def chat(job_id: str, req: ChatRequest):
     marker = "FINAL REPORT"
     marker_idx = diagnosis.find(marker)
     diagnosis_for_chat = diagnosis[marker_idx:] if marker_idx != -1 else diagnosis
-    MAX_DIAGNOSIS_CHARS = 60000
+    # Observed on the A100 node: 80,000 combined chars of dense clinical/genomic
+    # text (gene symbols, HGVS, scores) tokenized to 31,269 tokens — ~2.56
+    # chars/token, well below the usual ~4 chars/token English estimate. Caps
+    # below assume a conservative 2.0 chars/token so a large multi-variant batch
+    # can't walk past --max-model-len 32768 the way it did here (400 Bad Request:
+    # "prompt contains at least 31269 input tokens" + max_tokens=1500 = 32769).
+    MAX_DIAGNOSIS_CHARS = 42000
     if len(diagnosis_for_chat) > MAX_DIAGNOSIS_CHARS:
         diagnosis_for_chat = (
             diagnosis_for_chat[:MAX_DIAGNOSIS_CHARS]
@@ -605,7 +611,7 @@ async def chat(job_id: str, req: ChatRequest):
     # fields, so chat gets the source data directly instead of only the model's
     # processed version of it.
     raw_csv_text = job.get("raw_csv_text", "")
-    MAX_RAW_CSV_CHARS = 20000
+    MAX_RAW_CSV_CHARS = 15000
     if len(raw_csv_text) > MAX_RAW_CSV_CHARS:
         raw_csv_text = raw_csv_text[:MAX_RAW_CSV_CHARS] + "\n\n[...input truncated for length...]"
     original_input_block = (

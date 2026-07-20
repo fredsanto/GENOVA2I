@@ -21,9 +21,33 @@ INCLUDE requires evidence for BOTH:
    - Gene reported in literature or OMIM for this phenotype or a phenotypically
      overlapping condition, OR
    - ClinVar entries for this gene list the patient's disease as associated condition.
+   A literature hit only counts if it describes an actual gene-disease relationship
+   (this gene causes/is associated with this disease or a genuine differential of it)
+   — NOT a paper that merely contains a shared descriptive word while describing an
+   unrelated disease process. E.g. a paper about hypermethylation of gene X in
+   "vascular cognitive impairment" that happens to mention "visual and cognitive
+   deficits" as a symptom of that acquired/vascular condition is NOT a gene-phenotype
+   link for a patient being worked up for a primary genetic visual impairment — that
+   is keyword overlap, not a disease relationship, and does not satisfy criterion 1.
+   If the literature evidence itself states there is no direct link to the patient's
+   specific phenotype (even while discussing the gene in some other disease context),
+   treat criterion 1 as NOT met.
 
 2. PROBABLE PATHOGENICITY — the variant itself is likely damaging:
-   - ClinVar Pathogenic or Likely pathogenic, OR
+   - ClinVar Pathogenic or Likely pathogenic — but a ClinVar P/LP call is only as
+     strong as the disease it's actually paired with. Check the ClinVar "Conditions"
+     field against the patient's phenotype: if Conditions is blank/"(none listed)",
+     or lists a disease unrelated to the patient's presentation, this P/LP label does
+     NOT satisfy criterion 2 for this patient — a variant can be genuinely pathogenic
+     for a disease this patient does not have, which says nothing about causing the
+     phenotype under evaluation here. Only let the ClinVar label count when its listed
+     condition plausibly matches or overlaps the patient's phenotype. Also weigh review
+     status: a classification from a single submitter with no assertion criteria
+     (0-star / "no specific assertion criteria provided") is the weakest ClinVar tier —
+     combined with an absent/unrelated condition, treat it as no real signal at all,
+     not as grounds for INCLUDE. A multi-submitter or expert-panel-reviewed P/LP
+     classification with a condition matching the patient's phenotype is the strong
+     version of this signal, OR
    - Strong ACMG criterion applies (PVS1, PS1, PS3, or equivalent), OR
    - Variant is rare (AF < 0.1%) with predicted functional impact (LoF, splice
      disruption, or high CADD score ≥ 20) — ZYGOSITY MUST MATCH INHERITANCE MODE:
@@ -125,4 +149,9 @@ Decision: EXCLUDE
 Example output (excluded — common variant, no signal):
 Include-case: gene has some OMIM disease association
 Exclude-case: AF 3%, CADD 8, ClinVar Benign, no LoF mechanism
+Decision: EXCLUDE
+
+Example output (excluded — keyword-overlap literature, low-confidence ClinVar):
+Include-case: single-submitter no-criteria ClinVar Pathogenic label
+Exclude-case: literature link is tangential (unrelated disease mentions shared symptom word), gene LoF-tolerant, no real gene-phenotype relationship
 Decision: EXCLUDE

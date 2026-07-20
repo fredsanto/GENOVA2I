@@ -74,6 +74,9 @@ variant-pipeline/
 │   │   ├── litvar2.py               ← literature search: gene-first three-track PubMed + LitVar2 rsID
 │   │   ├── autopvs1.py              ← AutoPVS1 PVS1 criterion evaluation (LoF variants)
 │   │   ├── spliceai.py              ← SpliceAI splice impact delta scores (Broad API)
+│   │   ├── gnomad_constraint.py     ← gnomAD gene constraint (pLI, LOEUF) — gene-scoped, class-cached
+│   │   ├── clinvar_gene_stats.py    ← ClinVar gene-level P/LP missense vs. nonsense/frameshift counts
+│   │   ├── clingen_allele.py        ← ClinGen Allele Registry variant resolution (CAid, cross-refs)
 │   │   ├── websearch.py             ← WebSearchTool + WebFetchTool (sub-tools for ReAct agent)
 │   │   ├── websearch_agent.py       ← WebSearchAgentTool: full ReAct web-search loop
 │   │   └── ncbi.py                  ← NCBIFetchTool (sub-tool for ReAct agent)
@@ -82,6 +85,9 @@ variant-pipeline/
 │       ├── litvar2.yaml
 │       ├── autopvs1.yaml
 │       ├── spliceai.yaml
+│       ├── gnomad_constraint.yaml
+│       ├── clinvar_gene_stats.yaml
+│       ├── clingen_allele.yaml
 │       └── websearch_agent.yaml
 │
 └── prompts/
@@ -396,8 +402,11 @@ note the missing evidence in the report rather than reasoning from a gap.
 |---|---|---|---|
 | `litvar2_summary` | `SLMTool` | 1 (parallel) | RS_ID valid **or** Gene present (Python gate) |
 | `spliceai` | `NetworkTool` | 1 (parallel) | Python gate — skips synonymous, intergenic, UTR, unresolvable coords |
+| `gnomad_constraint` | `NetworkTool` | 1 (parallel) | Gene present (manifest gate) |
+| `clinvar_gene_stats` | `NetworkTool` | 1 (parallel) | Gene present (manifest gate) |
+| `clingen_allele` | `NetworkTool` | 1 (parallel) | Python gate — a usable query can be built (transcript+cDNA, clean HGVS, or genomic SNV coordinates) |
 | `autopvs1` | `NetworkTool` | 2 (parallel) | Python gate — LoF/frameshift/splice variants only |
-| `websearch_agent` | `ReActTool` | 3 (serial) | Python gate — hard-skips ClinVar benign/likely-benign and common variants (AF > 1%); pre-loop checkpoint handles remaining cases |
+| `websearch_agent` | `ReActTool` | 3 (serial) | No gate — always runs; the ReAct agent's own pre-loop checkpoint (sees prior tool outputs + full variant record, including ClinVar_class/Frequency) decides whether search is needed |
 
 **`litvar2_summary`** runs a gene-first three-track search:
 
@@ -426,14 +435,42 @@ to a single max delta score by `_parse_spliceai_value()` based on the value's
 shape, not the column's name. Output labels are enriched for SLM readability
 (plain-English aberration names, explicit delta score scale).
 
+**`gnomad_constraint`** fetches pLI and LOEUF for the variant's gene from the public
+gnomAD GraphQL API. Gene-scoped, not variant-scoped — one call per gene per run,
+shared across all variants in that gene via a class-level cache. Used to judge
+whether loss-of-function is a plausible disease mechanism for the gene (PVS1
+supporting context) and, more generally, whether a gene tolerates LoF at all.
+
+**`clinvar_gene_stats`** fetches gene-level ClinVar P/LP variant counts, split by
+missense vs. nonsense/frameshift, via NCBI esearch (count-only, no per-variant
+fetch). Grounds PP2 (missense-predominant genes) and BP1 (truncating-predominant
+genes) — these criteria may only be applied when this block is present with the
+matching verdict, never from gene name or general plausibility alone.
+
+**`clingen_allele`** resolves the variant against the public ClinGen Allele Registry
+(`reg.clinicalgenome.org`, no API key) to its canonical allele ID (CAid) and
+cross-references ClinVar/dbSNP/gnomAD/ExAC. Query strategy, in order: (1) Transcript
+field + cDNA token extracted from HGVS, (2) HGVS field itself if already a clean
+versioned `transcript:c.` string, (3) genomic-coordinate SNV fallback — tried against
+*both* hg19 and hg38 RefSeq accessions (declared build first), because the pipeline's
+declared `genome_build` is not always right for a given upload and a wrong build
+reads back from ClinGen as an `IncorrectReferenceAllele` mismatch rather than a
+clean failure. An allele with zero cross-references in any indexed database is
+itself a meaningful signal (novel/unreported variant), surfaced explicitly rather
+than as a blank result.
+
 **`websearch_agent`** runs a ReAct loop with three sub-tools (WebSearchTool,
-WebFetchTool, NCBIFetchTool). Before starting the loop, a pre-loop checkpoint prompt
-receives all pre-fetched evidence from earlier tools (LitVar2, AutoPVS1) and decides
+WebFetchTool, NCBIFetchTool). No gate — always runs. Before starting the loop, a
+pre-loop checkpoint prompt receives all pre-fetched evidence from earlier tools
+(LitVar2, AutoPVS1, SpliceAI, gnomAD constraint, ClinVar gene stats, ClinGen allele)
+plus the full variant record (including `ClinVar_class`/`Frequency`) and decides
 whether any primary gaps remain (OMIM/GeneReviews, ClinVar details, functional data,
-recent case reports). The loop runs up to `max_steps=4` iterations; after each
-observation a mid-loop checkpoint decides whether to continue or stop. The Python
-gate hard-skips ClinVar benign/likely-benign and common variants (AF > 1%) before
-reaching the pre-loop checkpoint.
+recent case reports) or whether the variant needs search at all — this replaced an
+earlier Python `gate()` that hard-skipped ClinVar benign/likely-benign and common
+(AF > 1%) variants before the checkpoint ever ran; that decision now lives entirely
+in the checkpoint's own judgment, which has full visibility into those same fields.
+The loop runs up to `max_steps=4` iterations; after each observation a mid-loop
+checkpoint decides whether to continue or stop.
 
 ---
 

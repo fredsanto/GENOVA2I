@@ -76,6 +76,16 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
 
    [GENE] ([HGVS]) — [MOI layer this finding came from, e.g. "De novo", "Dominant-inherited", "Recessive (compound heterozygous)", "X-linked"]
 
+   Naming the disease/condition this gene causes: use ONLY the disease name
+   stated in THIS gene's own layer block — never borrow or generalize a
+   disease name from a different gene discussed nearby, even when several
+   genes share a broad phenotype category (e.g. multiple genes each
+   contributing to "visual impairment" does NOT mean they share the same
+   specific disease — each keeps only what its own evidence names, e.g. one
+   gene's block may name "X-linked retinoschisis" while another's names
+   "retinitis pigmentosa"; do not let one bleed into the other's paragraph).
+   If a gene's own block does not name a specific disease, do not invent one.
+
    Write a short prose paragraph (2-4 connected sentences, not bare bullet
    fragments) covering, in this order, whichever of the following apply:
    segregation/inheritance status (de novo, inherited maternal/paternal, or

@@ -524,6 +524,11 @@ class LitVar2SummaryTool(SLMTool):
         must be reported even if it doesn't bear on the patient's phenotype match,
         since it's the kind of mechanistic evidence ACMG functional-evidence criteria
         (e.g. PS3/BS3) are built on and must not be dropped for narrative brevity.
+        Same flag also forces extraction of case-count/proband-enumeration evidence
+        (PS4 grounding) — the summarizer otherwise tends to surface qualitative
+        mechanism statements (e.g. "a known mutational hotspot") over the actual
+        headcount of affected individuals reported with this variant, even when both
+        are present in the same abstract.
         """
 
         corpus = "\n\n".join(
@@ -539,7 +544,19 @@ class LitVar2SummaryTool(SLMTool):
             "stability effects, splicing effects), you MUST report that finding "
             "explicitly with its citation, even if it does not relate to the patient's "
             "phenotype. Do not omit direct variant-level functional evidence for the "
-            "sake of brevity — extend the paragraph if needed."
+            "sake of brevity — extend the paragraph if needed. "
+            "Separately, and just as mandatorily: scan every abstract for case-count/"
+            "proband evidence for this exact variant — any explicit number of affected "
+            "individuals, patients, probands, or families reported carrying it (e.g. "
+            "'identified in 12 unrelated probands', 'observed in 3 of 40 patients with "
+            "this phenotype', 'reported in 2 families'). This is the evidence that "
+            "grounds PS4 (prevalence in affected individuals vs. controls) and is easy "
+            "to miss when an abstract also contains a qualitative mechanism statement "
+            "(e.g. a hotspot or domain claim) — report the actual headcount explicitly "
+            "with its citation whenever a number is stated, even in a single clause, "
+            "rather than only reporting the qualitative claim. If no abstract states an "
+            "explicit affected-individual count for this variant, say so explicitly "
+            "rather than leaving it unaddressed."
             if require_functional else ""
         )
 

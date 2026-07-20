@@ -86,6 +86,24 @@ Specifically check for:
   state explicitly that no confirmed causative variant was found under a
   recessive model (insufficient evidence — single heterozygous hit only),
   and fix section 3's summary sentence to match.
+- DISEASE-NAME CHECK (mandatory, do this for EVERY gene the draft names as
+  causative, even if everything else about the draft looks correct): find
+  the specific disease/condition name the draft attributes to that gene in
+  section 2's prose (e.g. "the gene is a known cause of X"), and verify that
+  exact disease name appears in THAT gene's own layer block / embedded base
+  conclusion above — not in a different gene's block, and not merely implied
+  by a shared category phrase used earlier in the draft (e.g. "visual
+  impairment (retinitis pigmentosa or cone-rod dystrophy)" in the reasoning
+  section does NOT license attributing "retinitis pigmentosa" to every gene
+  discussed nearby — each gene keeps only the specific disease its own
+  evidence names). When multiple genes are listed together and share a broad
+  phenotype category, it is common for the draft to blur one gene's specific
+  named disease into a neighboring gene's paragraph — this is a HARD ERROR,
+  not a style issue, even when the borrowed disease name is phenotypically
+  plausible for the category. If a gene's paragraph names a disease not
+  found in that gene's own layer block, replace it with whatever disease
+  name (if any) that gene's own block actually states, or remove the
+  specific disease-name claim entirely if its own block doesn't name one.
 
 If you find no contradictions, output the draft unchanged.
 If you find contradictions, output a corrected version with the same

@@ -245,9 +245,19 @@ class NCBIFetchTool(NetworkTool):
 
         return "\n\n".join(parts)
 
+    # Matches the cDNA-change token out of a combined/compound HGVS string,
+    # e.g. "NM_000330:exon4:c.214G>A:p.E72K" -> "c.214G>A". ClinVar's own
+    # esearch [variant name] index only matches this clean token — the full
+    # colon-glued compound string comes back as one unsplittable phrase with
+    # zero hits, even when the variant is in ClinVar (verified: RS1 c.214G>A
+    # is variation ID 9888, findable only via the bare cDNA token).
+    _CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;]+")
+
     def resolve_clinvar_id(self, gene: str, hgvs: str) -> str | None:
         """Look up a ClinVar variation ID for gene+HGVS via esearch (no URL known yet)."""
-        term = f"{gene}[gene] AND {hgvs}[variant name]" if hgvs and hgvs != "NA" else f"{gene}[gene]"
+        cdna_match = self._CDNA_CHANGE_RE.search(hgvs) if hgvs and hgvs != "NA" else None
+        variant_term = cdna_match.group(0) if cdna_match else hgvs
+        term = f"{gene}[gene] AND {variant_term}[variant name]" if variant_term and variant_term != "NA" else f"{gene}[gene]"
         try:
             data = _ncbi_get(
                 "esearch.fcgi",
@@ -281,6 +291,12 @@ class NCBIFetchTool(NetworkTool):
         last_eval  = result.get("germline_classification", {}).get("last_evaluated", "")
         gene       = ", ".join(g["symbol"] for g in result.get("genes", []) if "symbol" in g)
         conditions = ", ".join(t["name"]   for t in result.get("trait_set", []) if "name" in t)
+        # An empty ClinVar trait_set is a load-bearing fact, not a formatting
+        # gap — a Pathogenic/Likely pathogenic call with no associated
+        # condition at all cannot be checked against the patient's phenotype
+        # and must not read as an unremarkable blank line the model can skim
+        # past (this exact case let an unrelated-disease P call reach INCLUDE).
+        conditions = conditions if conditions else "(none listed — no disease/condition associated with this ClinVar record)"
 
         comments_block = ""
         if is_pathogenic_clinvar(germline):

@@ -1,0 +1,15 @@
+name: clingen_allele
+description: "Resolves the variant against the ClinGen Allele Registry (CAid, cross-refs to ClinVar/dbSNP/gnomAD/ExAC)."
+enabled: true
+
+order: 1
+parallel: true
+
+# Python gate() determines whether a usable HGVS/genomic query can be built;
+# no manifest gate needed (mirrors autopvs1.yaml's approach).
+gate: ~
+
+timeout: 15
+retry:
+  attempts: 2
+  backoff: 2.0

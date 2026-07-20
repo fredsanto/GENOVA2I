@@ -50,7 +50,7 @@ from pipeline.core            import acmg_sf
 from pipeline.llm.registry   import get_client
 from pipeline.tools          import (
     AutoPVS1Tool, LitVar2SummaryTool, SpliceAITool, WebSearchAgentTool,
-    GnomadConstraintTool, ClinVarGeneStatsTool,
+    GnomadConstraintTool, ClinVarGeneStatsTool, ClinGenAlleleTool,
 )
 from pipeline.stages         import (
     retrieval, reasoning, conclusion, cross_analysis, final_conclusion, first_triage,
@@ -305,6 +305,7 @@ class Pipeline:
             WebSearchAgentTool(),
             GnomadConstraintTool(),
             ClinVarGeneStatsTool(),
+            ClinGenAlleleTool(),
         ]
 
         # ── Executor ──────────────────────────────────────────────────────────
@@ -515,6 +516,40 @@ class Pipeline:
             label = moi.PERTINENCE_LABELS[value]
             return f"\n--- GENE-PHENOTYPE LITERATURE PERTINENCE (backend-determined) ---\n{label}\n"
 
+        def _zygosity_note_block(i: int) -> str:
+            """Backend-determined caveat for apparent homozygosity on a chrX
+            gene. The canonical schema has no patient-sex field, so a
+            "Homozygous" Zygosity call on chrX is systematically ambiguous:
+            it's frequently a hemizygous male call (single X allele, ~100%
+            VAF) that the upstream variant caller reports as "Homozygous"
+            because only one allele is observed — indistinguishable from
+            true biallelic homozygosity without sex information. Layer 6
+            (moi_xlinked.py) already treats hemizygous/homozygous as
+            equally consistent with XLR via AB-derived pattern, but Layers
+            1-2 (reasoning/second_triage/conclusion) run first and see the
+            raw Zygosity field with no such caveat — without this note the
+            model can treat "true" homozygosity as improbable for a rare
+            X-linked variant (e.g. absent consanguinity) and downweight or
+            exclude the variant on that basis alone. Handed to the prompts
+            as a stated fact, same pattern as _inheritance_mode_block."""
+            zyg = str(variants[i].get("Zygosity", "") or "").strip().lower()
+            if "hom" not in zyg:
+                return ""
+            if moi.gene_chromosome(variants, [i]) != "X":
+                return ""
+            gene = variants[i].get("Gene", "NA")
+            return (
+                "\n--- ZYGOSITY CAVEAT (backend-determined) ---\n"
+                f"Gene {gene} is on chrX and Zygosity reads Homozygous, but patient "
+                "sex is not part of this dataset. A 'Homozygous' call on chrX is "
+                "commonly a hemizygous male variant (single X allele, ~100% VAF) "
+                "reported as 'Homozygous' because only one allele is seen — "
+                "indistinguishable from true homozygosity without sex information. "
+                "Treat this as a plausible hemizygous-male hit, not as evidence "
+                "against the variant. Do NOT discard, exclude, or downweight this "
+                "variant on the grounds that true homozygosity would be improbable.\n"
+            )
+
         def _sibling_evidence_block(i: int) -> str:
             """Sibling block built from raw retrieval evidence (Call 1 — no reasoning
             exists yet). Skipped only when this variant is a CONFIRMED homozygous
@@ -551,7 +586,7 @@ class Pipeline:
 
         def _reason_one(i: int) -> tuple[int, str]:
             sib_block  = _sibling_evidence_block(i)
-            mode_block = _inheritance_mode_block(i)
+            mode_block = _inheritance_mode_block(i) + _zygosity_note_block(i)
             return i, reasoning.run_reasoning(
                 variant_context=context_slices[i], llm=self._llm,
                 sibling_context_block=sib_block,
@@ -615,7 +650,7 @@ class Pipeline:
             sib_block = _sibling_block(i)
             combined = reasoning.run_second_triage(
                 variant_context=context_slices[i],
-                reasoning_text=reasoning_only[i],
+                reasoning_text=reasoning_only[i] + _zygosity_note_block(i),
                 llm=self._llm,
                 sibling_context_block=sib_block,
             )
@@ -705,7 +740,7 @@ class Pipeline:
             ca   = cross_analyses.get(gene) if gene != "NA" else None
             # Pertinence appended to the reasoning text (not a new run_one()
             # param) — see _pertinence_block's docstring for why.
-            reasoning_with_pertinence = reasonings[i] + _pertinence_block(i)
+            reasoning_with_pertinence = reasonings[i] + _pertinence_block(i) + _zygosity_note_block(i)
             return i, conclusion.run_one(
                 variant_context=context_slices[i],
                 reasoning=reasoning_with_pertinence,

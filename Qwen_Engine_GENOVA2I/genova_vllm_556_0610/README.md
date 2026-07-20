@@ -25,6 +25,8 @@ CSV / Excel  ──►  normalize_upload()
         │                                          │
         │  per variant:                            │
         │  order 1 parallel: LitVar2  SpliceAI     │
+        │    GnomadConstraint  ClinVarGeneStats    │
+        │    ClinGenAllele                         │
         │  order 2 parallel: AutoPVS1              │
         │  order 3 serial:   WebSearchAgentTool    │
         └──────────────┬──────────────────────────┘
@@ -152,6 +154,18 @@ VARIANT 1 — GENE  NM_xxx.x:c.xxx
     SpliceAI scores ...
 
 [AUTOPVS1]  GATE: SKIPPED  (variant type not LoF)
+
+[GNOMAD_CONSTRAINT]  GATE: PASS
+  Raw output:
+    GNOMAD GENE CONSTRAINT (GENE, GRCh37): pLI = ... LOEUF = ...
+
+[CLINVAR_GENE_STATS]  GATE: PASS
+  Raw output:
+    CLINVAR GENE-LEVEL P/LP VARIANT COUNTS (GENE): ...
+
+[CLINGEN_ALLELE]  GATE: PASS
+  Raw output:
+    CLINGEN ALLELE REGISTRY (query): CAid, cross-refs to ClinVar/dbSNP/gnomAD
 
 [WEBSEARCH_AGENT]  GATE: PASS
   ReAct trace:
