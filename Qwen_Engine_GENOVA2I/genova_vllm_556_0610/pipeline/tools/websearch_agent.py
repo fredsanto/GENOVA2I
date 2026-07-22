@@ -31,6 +31,7 @@ from pipeline.core.context import ToolContext
 from pipeline.tools.websearch import WebSearchTool, WebFetchTool
 from pipeline.tools.ncbi import NCBIFetchTool
 from pipeline.core.acmg_sf import is_pathogenic_clinvar
+from pipeline.core.protein_change import extract_residue_queries as _extract_residue_queries
 
 
 # ─────────────────────────────────────────────
@@ -190,6 +191,9 @@ def checkpoint_messages(user_input: str, scratchpad: list[str],
             "Given the available evidence, decide whether further web search is needed.\n\n"
             "Primary gaps to check first (prefer these over PubMed):\n"
             "- OMIM or GeneReviews entry for this gene\n"
+            "- Mode of inheritance for this gene (autosomal dominant/recessive, "
+            "X-linked, or a dominant-negative mechanism) — check OMIM's "
+            "'Inheritance' field or GeneReviews\n"
             "- ClinVar submitter details or review status\n"
             "- Functional or experimental data for this specific variant\n"
             "- Recent preprints or clinical case reports\n\n"
@@ -231,7 +235,18 @@ def final_answer_messages(user_input: str, conversation: list[dict],
             "Synthesise the findings that link (or do not link) the variant or gene to the disease. "
             "Include URLs for any sources cited. "
             "Do NOT mention tools, search steps, or internal reasoning. "
-            "Begin directly with the evidence."
+            "Begin directly with the evidence.\n\n"
+            "Whenever the sources support it, explicitly answer these two questions "
+            "before finishing your answer: (1) Phenotype relevance — is this gene "
+            "affirmatively linked to the patient's phenotype, and how specifically; "
+            "(2) Mode of inheritance — is this gene's disease mechanism autosomal "
+            "dominant, autosomal recessive, X-linked, or dominant-negative "
+            "(name the mechanism explicitly, e.g. 'dominant-negative — mutant "
+            "subunit interferes with the wild-type protein', if the sources "
+            "describe one), citing the source for each. If a source does not "
+            "address one of these questions, say so plainly rather than omitting "
+            "the question entirely — do not guess or infer either answer beyond "
+            "what the sources state."
         )},
         *conversation,
         {"role": "user", "content": (
@@ -488,23 +503,51 @@ class WebSearchAgentTool(ReActTool):
                 label = tool_name.upper().replace("_", " ")
                 prefetched_parts.append(f"{label} EVIDENCE:\n{output}")
 
-        # ── Hardcoded variant-specific search (HGVS, not rsID) ───────────────
+        # ── Hardcoded variant-specific search (residue, not nucleotide) ──────
+        # A nucleotide-level query (e.g. "c.3962G>C") can only ever find THIS
+        # exact allele. Both PS1 and PM5 need the opposite: OTHER established
+        # pathogenic variants at the SAME residue — PS1 via a DIFFERENT
+        # nucleotide producing the SAME amino acid change, PM5 via a DIFFERENT
+        # missense change altogether — neither of which a nucleotide-exact or
+        # full-change-exact query can surface by construction. Search by
+        # residue only (3-letter form, e.g. "p.Cys1321", matching ClinVar's
+        # naming convention, destination amino acid dropped) so one query
+        # returns every substitution reported at that position. Downstream in
+        # the conclusion stage: same amino acid change + different nucleotide
+        # → PS1; different amino acid change (any nucleotide) → PM5; same
+        # nucleotide as this variant → it's this variant's own record, not a
+        # separate precedent (check PS3 instead).
         gene = (variant.get("Gene") or "").strip()
         hgvs = (variant.get("HGVS") or "").strip()
         if gene and gene != "NA" and hgvs and hgvs != "NA":
-            # Use only the change part: NM_000500.9:c.292+5G>A → c.292+5G>A
-            hgvs_short = hgvs.split(":")[-1] if ":" in hgvs else hgvs
-            variant_query = f"{gene} {hgvs_short} ClinVar"
             import logging as _logging
-            _logging.getLogger(__name__).info(
-                "[WebSearchAgent] Variant-specific search: %r", variant_query
-            )
+            _logger = _logging.getLogger(__name__)
             _ws = WebSearchTool()
-            variant_search_result = _ws.run(variant_query)
-            if variant_search_result and not variant_search_result.startswith(("Error", "No results")):
-                prefetched_parts.append(
-                    f"VARIANT WEB SEARCH ({variant_query}):\n{variant_search_result}"
-                )
+            residue_queries = _extract_residue_queries(hgvs)
+            if residue_queries:
+                for seed in residue_queries[:4]:   # bounded — multi-transcript HGVS rarely exceeds this
+                    variant_query = f"{gene} {seed['query']} ClinVar"
+                    _logger.info(
+                        "[WebSearchAgent] Residue-level search: %r (candidate change: %s)",
+                        variant_query, seed["own_change"],
+                    )
+                    result = _ws.run(variant_query)
+                    if result and not result.startswith(("Error", "No results")):
+                        prefetched_parts.append(
+                            f"VARIANT WEB SEARCH ({variant_query} — candidate's own change is "
+                            f"{seed['own_change']}; for PS1/PM5, compare each hit's amino acid "
+                            f"and nucleotide change against this):\n{result}"
+                        )
+            else:
+                # No parseable protein change (e.g. intronic/splice variant) —
+                # PS1/PM5 don't apply to these anyway; fall back to a
+                # nucleotide-level query for general ClinVar visibility.
+                hgvs_short = hgvs.split(":")[-1] if ":" in hgvs else hgvs
+                variant_query = f"{gene} {hgvs_short} ClinVar"
+                _logger.info("[WebSearchAgent] Nucleotide-level search (no protein change parsed): %r", variant_query)
+                result = _ws.run(variant_query)
+                if result and not result.startswith(("Error", "No results")):
+                    prefetched_parts.append(f"VARIANT WEB SEARCH ({variant_query}):\n{result}")
 
         # ── Forced ClinVar submission-level check (P/LP variants) ───────────
         # ClinVar_class P/LP in the input CSV is just an aggregate label — it

@@ -27,8 +27,10 @@ CLINGEN_ALLELE_REGISTRY_URL = "https://reg.clinicalgenome.org/allele"
 # Extracts the cDNA-change token out of a combined/compound HGVS string, e.g.
 # "RS1:NM_000330:exon4:c.214G>A:p.E72K" -> "c.214G>A". Same shape of problem
 # as ncbi.py's ClinVar resolver — the Allele Registry wants a clean
-# "TRANSCRIPT:c.change" pair, not a colon-glued compound annotation.
-_CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;]+")
+# "TRANSCRIPT:c.change" pair, not a colon-glued compound annotation. "("
+# excluded too — otherwise a "c.1292T>A(p.Val431Asp)"-style string swallows
+# the trailing protein annotation into the token.
+_CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;()]+")
 _CLEAN_TRANSCRIPT_HGVS_RE = re.compile(r"^[A-Za-z0-9_]+\.\d+:c\.")
 
 # RefSeq genomic accessions, used only for the genomic-coordinate SNV
@@ -82,13 +84,16 @@ def _build_query_candidates(variant: dict, genome_build: str) -> list[str]:
     if hgvs and hgvs != "NA" and _CLEAN_TRANSCRIPT_HGVS_RE.match(hgvs):
         candidates.append(hgvs)
 
-    coords = parse_variant_coords(
-        variant_str=variant.get("Variant", ""),
-        chrom_field=variant.get("Chromosome", ""),
-        pos_field=variant.get("Position", ""),
-        ref_field=variant.get("Ref_seq", ""),
-        alt_field=variant.get("Var_seq", ""),
-    )
+    try:
+        coords = parse_variant_coords(
+            variant_str=variant.get("Variant", ""),
+            chrom_field=variant.get("Chromosome", ""),
+            pos_field=variant.get("Position", ""),
+            ref_field=variant.get("Ref_seq", ""),
+            alt_field=variant.get("Var_seq", ""),
+        )
+    except ValueError:
+        coords = None
     if coords:
         chrom, pos, ref, alt = coords
         if len(ref) == 1 and len(alt) == 1 and ref not in ("-", "") and alt not in ("-", ""):

@@ -82,25 +82,49 @@ def classify_segregation(proband_ab, mother_ab, father_ab) -> str:
       "insufficient_data"   — mother and/or father AB not present at all
 
     Deliberately does not use the proband's own classification to gate the
-    "insufficient_data" return — a trio with no parental AB is insufficient
-    regardless of how confident the proband's own zygosity call is."""
-    if not _is_present(mother_ab) or not _is_present(father_ab):
+    "insufficient_data" return — a trio with no parental AB at all is
+    insufficient regardless of how confident the proband's own zygosity call
+    is. But "no parental AB at all" means neither parent, not "not literally
+    both" — a duo study (one parent tested, the other simply never sampled)
+    can still resolve to "maternal"/"paternal" from the one tested parent
+    alone; requiring both unconditionally made those two return values dead
+    code (unreachable — by the time either branch's own condition, e.g.
+    father_class == "absent", could be checked, father would already have
+    passed the presence gate, so "absent" there could never mean "untested")
+    and forced every duo case into "insufficient_data" regardless of how
+    clear the single available parent's signal was."""
+    mother_present = _is_present(mother_ab)
+    father_present = _is_present(father_ab)
+
+    if not mother_present and not father_present:
         return "insufficient_data"
 
     proband_class = classify_ab_ratio(proband_ab)
-    mother_class  = classify_ab_ratio(mother_ab)
-    father_class  = classify_ab_ratio(father_ab)
+    mother_class  = classify_ab_ratio(mother_ab) if mother_present else None
+    father_class  = classify_ab_ratio(father_ab) if father_present else None
 
-    if proband_class == "het" and mother_class == "absent" and father_class == "absent":
-        return "de_novo"
-    if proband_class == "hom" and mother_class == "het" and father_class == "het":
-        return "both_carriers"
-    if mother_class == "hom" or father_class == "hom":
+    if mother_present and father_present:
+        if proband_class == "het" and mother_class == "absent" and father_class == "absent":
+            return "de_novo"
+        if proband_class == "hom" and mother_class == "het" and father_class == "het":
+            return "both_carriers"
+        if mother_class == "hom" or father_class == "hom":
+            return "homozygous_parent"
+        if mother_class == "het" and father_class == "absent":
+            return "maternal"
+        if father_class == "het" and mother_class == "absent":
+            return "paternal"
+        return "uncertain"
+
+    # Duo: exactly one parent tested. Resolve from that parent alone —
+    # cannot distinguish de_novo/both_carriers (those inherently need both
+    # parents' data), but a het/hom call in the one tested parent is on its
+    # own sufficient to call maternal/paternal/homozygous_parent.
+    tested_class = mother_class if mother_present else father_class
+    if tested_class == "hom":
         return "homozygous_parent"
-    if mother_class == "het" and father_class == "absent":
-        return "maternal"
-    if father_class == "het" and mother_class == "absent":
-        return "paternal"
+    if tested_class == "het":
+        return "maternal" if mother_present else "paternal"
     return "uncertain"
 
 

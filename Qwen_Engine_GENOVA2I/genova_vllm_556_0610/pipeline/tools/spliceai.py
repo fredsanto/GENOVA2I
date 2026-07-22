@@ -311,28 +311,30 @@ class SpliceAITool(NetworkTool):
             return False
 
         # Require resolvable coordinates
-        coords = parse_variant_coords(
-            variant_str=variant.get("Variant", ""),
-            chrom_field=variant.get("Chromosome", ""),
-            pos_field=variant.get("Position", ""),
-            ref_field=variant.get("Ref_seq", ""),
-            alt_field=variant.get("Var_seq", ""),
-        )
-        if not coords:
+        try:
+            parse_variant_coords(
+                variant_str=variant.get("Variant", ""),
+                chrom_field=variant.get("Chromosome", ""),
+                pos_field=variant.get("Position", ""),
+                ref_field=variant.get("Ref_seq", ""),
+                alt_field=variant.get("Var_seq", ""),
+            )
+        except ValueError:
             print(f"[SpliceAI gate] SKIP — cannot resolve coordinates")
             return False
 
         return True
 
     def run(self, variant: dict, context: ToolContext) -> str | None:
-        coords = parse_variant_coords(
-            variant_str=variant.get("Variant", ""),
-            chrom_field=variant.get("Chromosome", ""),
-            pos_field=variant.get("Position", ""),
-            ref_field=variant.get("Ref_seq", ""),
-            alt_field=variant.get("Var_seq", ""),
-        )
-        if not coords:
+        try:
+            coords = parse_variant_coords(
+                variant_str=variant.get("Variant", ""),
+                chrom_field=variant.get("Chromosome", ""),
+                pos_field=variant.get("Position", ""),
+                ref_field=variant.get("Ref_seq", ""),
+                alt_field=variant.get("Var_seq", ""),
+            )
+        except ValueError:
             return None
 
         chrom, pos, ref, alt = coords

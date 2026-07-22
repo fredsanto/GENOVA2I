@@ -306,6 +306,13 @@ async def _run_direct(job_id: str, csv_bytes: bytes, filename: str, phenotype: s
         await _finish_job(job_id)
         return
 
+    from pipeline.core.build_detection import detect_genome_build
+    genome_build = detect_genome_build(variants)
+    await _push_event(job_id, {
+        "type": "status",
+        "message": f"Detected genome build: {genome_build}",
+    })
+
     n = len(variants)
     await _push_event(job_id, {
         "type": "progress",
@@ -424,6 +431,7 @@ async def _run_direct(job_id: str, csv_bytes: bytes, filename: str, phenotype: s
                 pipeline_obj.run(
                     variants, phenotype, raw_rows=raw_rows, parental_ab=parental_ab,
                     header_mapping_summary=header_mapping_summary,
+                    genome_build=genome_build,
                 )
             )
         finally:

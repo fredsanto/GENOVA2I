@@ -242,6 +242,52 @@ http://localhost:8002
 
 ---
 
+## Troubleshooting
+
+### vLLM fails to start: `[launch] ERROR: vLLM did not become ready within 600s`
+
+Check `vllm_server.log` for the actual root cause (the launch log only reports
+the timeout, not why). A real case seen on Curnagl:
+
+```
+OSError: [Errno 122] Disk quota exceeded: '.../.cache/vllm/torch_compile_cache/.../inductor_cache/...'
+```
+
+This is a **file-count quota**, not disk space — check with:
+
+```bash
+quotacheck
+```
+
+```
+------------------------------------------user quota in G-------------------------------------------
+Path                     Quota   Used    Avail   Use% | Quota_files  No_files      Use%
+/users/fsantoni1         50.00   29.11   20.89    58% | 203424       202400        101%
+```
+
+Note the two separate `Use%` columns — space can be nowhere near full (58%
+here) while the **file count** is over quota (101% here). vLLM's torch
+`inductor_cache`/AOT compile cache writes many small files per run; repeated
+restarts across a session accumulate them until the file-count quota is hit,
+at which point vLLM can't even write its compile cache and the engine core
+crashes on startup. Also check the `work` quotas in the same `quotacheck`
+output (shared project storage, e.g. `pitnet_100362-pr-g`) — those can hit
+either the space or file-count ceiling independently of the user quota.
+
+**Fix:** clear the vLLM compile cache (safe — it's regenerated on next
+startup) to free up file count:
+
+```bash
+rm -rf ~/.cache/vllm/torch_compile_cache
+```
+
+If the `work` project quota (not the user quota) is the one that's full,
+that requires cleaning up files under `/work/.../<project>/` instead —
+check `du -sh` on likely large subdirectories (e.g. `results/`, old model
+checkpoints) before deleting anything.
+
+---
+
 ## Installing Dependencies
 
 One-time setup (login node):

@@ -250,8 +250,12 @@ class NCBIFetchTool(NetworkTool):
     # esearch [variant name] index only matches this clean token — the full
     # colon-glued compound string comes back as one unsplittable phrase with
     # zero hits, even when the variant is in ClinVar (verified: RS1 c.214G>A
-    # is variation ID 9888, findable only via the bare cDNA token).
-    _CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;]+")
+    # is variation ID 9888, findable only via the bare cDNA token). "(" also
+    # excluded — a "c.1292T>A(p.Val431Asp)"-style string otherwise swallows
+    # the trailing protein annotation into the token, producing an
+    # unmatchable esearch term (verified: LARS1 c.1292T>A / Variation ID
+    # 431849 silently failed to resolve until this exclusion was added).
+    _CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;()]+")
 
     def resolve_clinvar_id(self, gene: str, hgvs: str) -> str | None:
         """Look up a ClinVar variation ID for gene+HGVS via esearch (no URL known yet)."""

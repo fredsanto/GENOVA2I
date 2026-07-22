@@ -1,0 +1,11 @@
+name: gnomad_frequency
+description: "Fetches this variant's own gnomAD allele frequency — fallback for when the CSV's Frequency field is blank."
+enabled: true
+
+order: 1
+parallel: true
+
+timeout: 15
+retry:
+  attempts: 2
+  backoff: 2.0

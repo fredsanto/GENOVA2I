@@ -14,7 +14,7 @@ Both paths reuse the same HTML parser. Results where AutoPVS1 returns
 
 Public functions (module-level, used internally by AutoPVS1Tool):
   vcf_to_autopvs1_id(chrom, pos, ref, alt)         -> "6-100896130-T-C"
-  parse_variant_coords(variant_str, ...)            -> (chrom, pos, ref, alt) | None
+  parse_variant_coords(variant_str, ...)            -> (chrom, pos, ref, alt); raises ValueError
   fetch_variant_data(variant_id, hg)                -> dict | None
   fetch_variant_data_search(hgvs_str, hg)           -> (dict, resolved_id) | (None, None)
   fetch_and_format_autopvs1(chrom, pos, ref, alt,
@@ -84,7 +84,7 @@ def parse_variant_coords(
     pos_field:   str = "",
     ref_field:   str = "",
     alt_field:   str = "",
-) -> tuple[str, str, str, str] | None:
+) -> tuple[str, str, str, str]:
     """
     Extract (chrom, pos, ref, alt) from available CSV fields.
 
@@ -93,7 +93,14 @@ def parse_variant_coords(
       2. Parse the Variant column free-text string
       3. Fall back to chrom+pos from columns + loose base extraction from Variant string
 
-    Returns None if extraction fails entirely.
+    Raises ValueError if extraction fails entirely — e.g. the Variant string
+    uses a separator character none of the regexes recognize (observed case:
+    a mangled '?' where an ref>alt arrow should be, upstream CSV encoding
+    damage). Callers that intentionally sample many variants and expect some
+    to be unparseable (build_detection's candidate loop) must catch this and
+    skip; callers processing a single already-gated variant (AutoPVS1Tool.run)
+    should let it surface as a typed pipeline error instead of returning
+    silent None.
     """
 
     def ok(v: str) -> bool:
@@ -129,7 +136,11 @@ def parse_variant_coords(
         if len(bases) >= 2:
             return chrom_field, pos_field, bases[0].upper(), bases[1].upper()
 
-    return None
+    raise ValueError(
+        f"parse_variant_coords: could not extract coordinates — "
+        f"variant_str={variant_str!r} chrom={chrom_field!r} pos={pos_field!r} "
+        f"ref={ref_field!r} alt={alt_field!r}"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -533,17 +544,22 @@ class AutoPVS1Tool(NetworkTool):
         """
         Extract VCF coordinates from the canonical variant dict,
         then call fetch_and_format_autopvs1().
-        Returns the formatted evidence block or None if coords cannot be resolved.
+        Returns the formatted evidence block, or None if AutoPVS1 has no
+        usable result (intergenic, gene mismatch, fetch failure).
+        Raises ToolParseError if coordinates cannot be extracted at all —
+        the gate already confirmed this variant is LoF-eligible, so an
+        unparseable Variant/HGVS string here is a data problem, not a skip.
         """
-        coords = parse_variant_coords(
-            variant_str=variant.get("Variant", ""),
-            chrom_field=variant.get("Chromosome", ""),
-            pos_field=variant.get("Position", ""),
-            ref_field=variant.get("Ref_seq", ""),
-            alt_field=variant.get("Var_seq", ""),
-        )
-        if not coords:
-            return None
+        try:
+            coords = parse_variant_coords(
+                variant_str=variant.get("Variant", ""),
+                chrom_field=variant.get("Chromosome", ""),
+                pos_field=variant.get("Position", ""),
+                ref_field=variant.get("Ref_seq", ""),
+                alt_field=variant.get("Var_seq", ""),
+            )
+        except ValueError as e:
+            raise ToolParseError(f"AutoPVS1: {e}") from e
 
         chrom, pos, ref, alt = coords
         try:
@@ -576,7 +592,10 @@ if __name__ == "__main__":
 
     print("=== parse_variant_coords (from Variant string only) ===")
     for variant_str, *_ in test_cases:
-        coords = parse_variant_coords(variant_str)
+        try:
+            coords = parse_variant_coords(variant_str)
+        except ValueError as e:
+            coords = f"ERROR: {e}"
         print(f"  {variant_str!r:40s} → {coords}")
 
     print("\n=== vcf_to_autopvs1_id ===")

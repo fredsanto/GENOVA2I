@@ -11,7 +11,8 @@ Public API:
     classify_inheritance_mode(text, allow_x_linked=True) -> str
     gene_chromosome(variants, idxs) -> str
     zygosity_is_confirmed_hom(zyg) -> bool
-    build_gene_mode_cache(variants, kept_indices, context_slices, group_by_gene) -> dict[str, str]
+    build_gene_mode_cache(variants, kept_indices, context_slices, group_by_gene, llm) ->
+        (dict[str, str], dict[str, str])
     build_recessive_gene_groups(variants, gene_mode_cache, kept_indices, group_by_gene) -> dict[str, list[int]]
     MODE_LABELS: dict[str, str]
 """
@@ -20,9 +21,29 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pipeline.llm.base import LLMClient
 
 logger = logging.getLogger(__name__)
+
+MAX_WORKERS_MODE_CLASSIFICATION = 16
+MAX_NEW_TOKENS_MODE_CLASSIFICATION = 350
+
+_MODE_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "moi_mode_classification.txt"
+
+_MODE_TOKEN_RE = re.compile(
+    r"Mode:\s*(AD_AR|XLD_XLR|AD|AR|XLR|XLD|XL|UNKNOWN)", re.IGNORECASE
+)
+
+
+def _load_mode_prompt() -> str:
+    if _MODE_PROMPT_PATH.exists():
+        return _MODE_PROMPT_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(f"moi_mode_classification prompt not found at {_MODE_PROMPT_PATH}.")
 
 # ── inheritance-mode regexes ─────────────────────────────────────────────────
 _XLR_RE       = re.compile(r"x-?linked\s*recessive|\bXLR\b", re.IGNORECASE)
@@ -139,6 +160,61 @@ def classify_inheritance_mode(text: str, allow_x_linked: bool = True) -> str:
     return ""
 
 
+def _llm_classify_mode(
+    gene: str,
+    evidence_text: str,
+    llm: "LLMClient",
+    allow_x_linked: bool,
+) -> tuple[str, str]:
+    """LLM-reasoned replacement for the old regex-based tier-3 fallback.
+
+    Reads the gene's pooled free-text evidence (literature, websearch,
+    gnomAD constraint block) and reasons explicitly about AD/AR/X-linked
+    mode, including whether a dominant-negative mechanism is described —
+    which is genuinely AD regardless of gnomAD pLI/LOEUF LoF-tolerance,
+    unlike haploinsufficiency-based AD. See prompts/moi_mode_classification.txt
+    for the full reasoning rules (negation-safe, mechanism-aware).
+
+    Returns (mode, reasoning_text). mode == "" means UNKNOWN/unresolved —
+    same convention as classify_inheritance_mode(). allow_x_linked=False
+    strips any X-linked mode the LLM returns, mirroring the hard chrX gate
+    applied elsewhere in this module.
+    """
+    template = _load_mode_prompt()
+    user_prompt = template.replace("{gene}", gene).replace("{evidence_text}", evidence_text)
+
+    try:
+        result = llm.generate(
+            system=(
+                "You are an expert clinical geneticist determining a gene's mode of "
+                "inheritance from literature evidence. Limit your response to 150 words maximum."
+            ),
+            user=user_prompt,
+            max_tokens=MAX_NEW_TOKENS_MODE_CLASSIFICATION,
+        )
+    except Exception as exc:
+        logger.warning("[MOI] LLM mode classification failed for %s: %s", gene, exc)
+        return "", ""
+
+    m = _MODE_TOKEN_RE.search(result)
+    if not m:
+        logger.warning("[MOI] LLM mode classification unparseable for %s: %r", gene, result)
+        return "", result.strip()
+
+    mode = m.group(1).upper()
+    if mode == "UNKNOWN":
+        mode = ""
+    if not allow_x_linked and mode in ("XLR", "XLD", "XLD_XLR", "XL"):
+        logger.debug(
+            "[MOI] Gene %s: LLM returned X-linked mode %s but chrX is excluded — discarding",
+            gene, mode,
+        )
+        mode = ""
+
+    reasoning = result.split("Mode:")[0].replace("Reasoning:", "", 1).strip()
+    return mode, reasoning
+
+
 def zygosity_is_confirmed_hom(zyg) -> bool:
     """True only when the CSV Zygosity field explicitly reads homozygous —
     a confirmed-hom recessive call already explains the disease on its own
@@ -163,16 +239,32 @@ def build_gene_mode_cache(
     kept_indices: list[int],
     context_slices: list[str],
     group_by_gene: Callable[[list[dict]], dict[str, list[int]]],
-) -> dict[str, str]:
+    llm: "LLMClient",
+) -> tuple[dict[str, str], dict[str, str]]:
     """Compute inheritance mode per gene, over genes with >=1 kept variant,
     via a 3-tier fallback: (1) CSV Inheritance/OMIM_inheritance text, (2)
-    NHGRI CGD inheritance lookup, (3) retrieved literature/websearch evidence
-    text. Chromosome-based X-linked gating (gene_chromosome) is applied at
-    every tier. "" means still unknown after all three tiers."""
+    NHGRI CGD inheritance lookup, (3) an LLM call reasoning over the
+    retrieved literature/websearch evidence text (replaces the old naive
+    regex substring match — see _llm_classify_mode's docstring for why:
+    negation-blind keyword matching was misclassifying genes on incidental
+    "dominant"/"recessive" mentions, and had no way to reconcile a
+    dominant-negative mechanism against a LoF-tolerant gnomAD pLI/LOEUF).
+    Chromosome-based X-linked gating (gene_chromosome) is applied at every
+    tier. "" means still unknown after all three tiers.
+
+    Returns (gene_mode_cache, gene_mode_reasoning_cache) — the second dict
+    holds the LLM's reasoning text for genes resolved at tier 3 only ("" for
+    genes resolved at tier 1/2, which are unambiguous structured facts that
+    don't need justification)."""
     from pipeline.tools.litvar2 import LitVar2SummaryTool
 
     kept_set = set(kept_indices)
     gene_mode_cache: dict[str, str] = {}
+    gene_mode_reasoning_cache: dict[str, str] = {}
+    allow_x_linked_cache: dict[str, bool] = {}
+    tier3_targets: list[tuple[str, list[int], bool]] = []
+
+    # ── Pass 1: tiers 1/2 (cheap, structured-field regex) ────────────────────
     for gene, idxs in group_by_gene(variants).items():
         kept_in_gene = [i for i in idxs if i in kept_set]
         if not kept_in_gene or gene == "NA":
@@ -185,6 +277,7 @@ def build_gene_mode_cache(
         # since absence of proof isn't proof of absence.
         gene_chrom = gene_chromosome(variants, kept_in_gene)
         allow_x_linked = not (gene_chrom and gene_chrom != "X")
+        allow_x_linked_cache[gene] = allow_x_linked
         if gene_chrom and not allow_x_linked:
             logger.debug(
                 "[MOI] Gene %s is on chr%s — X-linked classification disabled",
@@ -206,17 +299,33 @@ def build_gene_mode_cache(
                 logger.warning("[MOI] CGD inheritance lookup failed for %s: %s", gene, exc)
                 cgd_inheritance = ""
             mode = classify_inheritance_mode(cgd_inheritance, allow_x_linked)
-        if not mode:
-            # CGD table lags newly characterized gene-disease links (e.g. CDK20/CCRK,
-            # 2026 PMID) — fall back to the retrieved literature/web-search evidence
-            # already fetched for these variants, which may state the mode in prose
-            # ("bi-allelic loss-of-function variants...") without the CSV or CGD
-            # ever recording it structurally.
-            evidence_text = " ".join(context_slices[i] for i in kept_in_gene)
-            mode = classify_inheritance_mode(evidence_text, allow_x_linked)
-        gene_mode_cache[gene] = mode  # "" means still unknown after all three tiers
+        if mode:
+            gene_mode_cache[gene] = mode
+            gene_mode_reasoning_cache[gene] = ""
+        else:
+            # CGD table lags newly characterized gene-disease links — defer to
+            # tier 3 (LLM reasoning over retrieved literature/web-search
+            # evidence), run concurrently below rather than serially here.
+            tier3_targets.append((gene, kept_in_gene, allow_x_linked))
 
-    return gene_mode_cache
+    # ── Pass 2: tier 3 (LLM reasoning), concurrent across unresolved genes ───
+    if tier3_targets:
+        def _resolve_one(item: tuple[str, list[int], bool]) -> tuple[str, str, str]:
+            gene, kept_in_gene, allow_x_linked = item
+            evidence_text = " ".join(context_slices[i] for i in kept_in_gene)
+            mode, reasoning = _llm_classify_mode(gene, evidence_text, llm, allow_x_linked)
+            return gene, mode, reasoning
+
+        workers = min(MAX_WORKERS_MODE_CLASSIFICATION, len(tier3_targets))
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            futures = {pool.submit(_resolve_one, item): item[0] for item in tier3_targets}
+            for future in as_completed(futures):
+                gene, mode, reasoning = future.result()
+                gene_mode_cache[gene] = mode  # "" means still unknown after all three tiers
+                gene_mode_reasoning_cache[gene] = reasoning
+                logger.info("[MOI] Gene %s: LLM-resolved mode=%r", gene, mode or "UNKNOWN")
+
+    return gene_mode_cache, gene_mode_reasoning_cache
 
 
 def build_recessive_gene_groups(

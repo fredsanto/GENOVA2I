@@ -1,3 +1,5 @@
+Patient phenotype (verbatim, as submitted): {patient_phenotype}
+
 MOI-layer findings (ground truth — do not deviate from these), grouped by
 layer ("=== DE NOVO LAYER ===", "=== DOMINANT-INHERITED LAYER ===", "===
 RECESSIVE LAYER ===", "=== X-LINKED LAYER ===", "=== UNCLASSIFIED ==="). A
@@ -16,6 +18,9 @@ RECESSIVE layer block is one of TWO kinds — check its title line first:
     error for lacking a Phase line or for "unconfirmed" biallelic status.
 {conclusions}
 
+ACMG SF actionable-gene findings (ground truth for section 3 below):
+{actionable_variants}
+
 Draft clinical conclusion to check:
 {draft}
 
@@ -23,6 +28,22 @@ TASK: Check the draft above against the MOI-layer findings for factual
 contradictions, then output a corrected version.
 
 Specifically check for:
+- CRITERIA LIST COMPLETENESS CHECK (mandatory, do this FIRST, for every
+  variant listed in section 2): a real past failure — the draft's section 2
+  paragraph mentioned a criterion in passing prose (e.g. "...a nonsense
+  mutation in a gene where loss-of-function is a known disease mechanism
+  (PVS1)...") and then jumped straight to "**ACMG classification:** Pathogenic
+  (11 pts total)" with NO structured criteria breakdown at all — no bulleted
+  "[CRITERION] ([Strength], +/-N pts): [justification]" list line-by-line.
+  A classification line with a point total but no criteria list under it is
+  INCOMPLETE, regardless of how well-written the prose paragraph above it is.
+  For every causative variant in section 2, verify a criteria list (one
+  bullet/clause per applied criterion, each with its strength, point value,
+  and justification) is present between the prose paragraph and the
+  **ACMG classification:** line. If it is missing, ADD it — copy the full
+  criteria list verbatim from that variant's own layer/base block above (the
+  "ACMG criteria:" or "Base ACMG criteria" lines), do not summarize it into
+  prose or invent one. This is the single most important check in this list.
 - Any ACMG criterion (PVS1, PS1-4, PM1-6, PP1-5, BA1, BS1-4, BP1-7...) named
   in the draft that does NOT appear in the cited variant's own layer block
   (or its embedded base conclusion).
@@ -104,6 +125,52 @@ Specifically check for:
   found in that gene's own layer block, replace it with whatever disease
   name (if any) that gene's own block actually states, or remove the
   specific disease-name claim entirely if its own block doesn't name one.
+
+- PP4 SPECIFICITY CHECK (mandatory, do this for every variant in section 2
+  whose criteria list includes PP4): re-read the "Patient phenotype (verbatim,
+  as submitted)" line at the top against that gene's own layer/base block. PP4
+  requires BOTH: (1) single-gene etiology — the disease is not known to be
+  caused by other genes too; (2) discriminating specificity — the patient's
+  phenotype includes a feature that is itself a recognized hallmark of this
+  specific disease, not a generic symptom shared by hundreds of syndromes
+  ("intellectual disability", "developmental delay", "seizures", "short
+  stature" in isolation never qualify). A real past failure: the patient's
+  ENTIRE submitted phenotype was the single generic term "intellectual
+  disability" — nothing else — yet PP4 was applied with the reasoning "a core
+  feature of the [GENE]-associated syndromic neurodevelopmental disorder".
+  That reasoning is circular (every candidate gene in a multi-gene panel run
+  shares that same generic phenotype) and fails condition (2) by construction
+  — a bare generic diagnosis label is not a distinguishing feature, no matter
+  how strong the gene-disease literature link otherwise looks. If the
+  submitted phenotype is only a generic term like this with nothing further,
+  remove PP4 from every variant's criteria list in section 2 and 4, recompute
+  that variant's point total and classification accordingly (a variant may
+  drop out of "causative" entirely if PP4 was the deciding point), and update
+  the summary sentence to match. Do this for EVERY variant with PP4, not just
+  the first one you check.
+- BENIGN/OUT-OF-SCOPE MENTION CHECK (mandatory, scan the ENTIRE # Clinical
+  Conclusion section): the only variants permitted anywhere in that section
+  are causative variants (section 2), ACMG SF actionable findings from the
+  ground-truth list above (section 3), and VUS variants with exactly 4 or 5
+  total ACMG points per their own layer/base block (section 4). If the draft
+  names, describes, or even mentions-as-excluded any variant classified
+  Benign or Likely Benign, or any VUS outside the 4-5 point range, delete
+  that mention entirely (do not replace it with an explanation of why it was
+  removed — just remove it, as if it were never written).
+- ACTIONABLE SECTION CHECK (mandatory): every variant listed in section 3
+  must appear in the ACMG SF ground-truth list above, with matching gene,
+  condition, and classification. Remove any section-3 entry not in the
+  ground-truth list. Add any ground-truth entry missing from section 3
+  (using the brief one-line format, or a cross-reference to section 2 if the
+  same variant is already written up there). If the ground-truth list says
+  "None" and section 3 lists variants anyway, replace section 3 with "None
+  identified."
+- NOTABLE VUS CHECK (mandatory): every variant listed in section 4 must have
+  a layer/base block above stating a total ACMG point value of exactly 4 or
+  5 AND a classification of "Uncertain significance"/"VUS". Remove any
+  section-4 entry whose own block shows a different point total or a
+  different classification. If section 4 is missing while a qualifying 4-5
+  point VUS exists in the layer findings above, add it.
 
 If you find no contradictions, output the draft unchanged.
 If you find contradictions, output a corrected version with the same

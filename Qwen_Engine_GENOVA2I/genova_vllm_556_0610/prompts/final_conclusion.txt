@@ -8,6 +8,27 @@ claim you make about a variant, that claim should be traceable to
 something stated in its conclusion (zygosity, inheritance, gene-disease
 evidence, ClinVar status, etc.).
 
+CATEGORY-VS-SYMPTOM CHECK (mandatory, applies whenever more than one gene is
+named causative): a real past failure — patient phenotype was entered as a
+compound/umbrella term ("cyliophathy (coloboma)"). One candidate gene (CDK20)
+is a genuine ciliopathy gene per its own per-variant conclusion (bi-allelic
+LoF causes a ciliopathy via defective ciliary function). A second candidate
+(TET3/Beck-Fahrner syndrome) is NOT a ciliopathy mechanistically — its own
+per-variant conclusion only established a link to the specific symptom
+"coloboma", never to ciliopathy as a disease category or mechanism. Writing
+"these findings support a diagnosis of ciliopathy due to variants in TET3 and
+CDK20" incorrectly launders TET3 into the ciliopathy category on the strength
+of a shared symptom alone. When two variants in different genes are each
+being listed as causative, use ONLY the specific condition/mechanism each
+variant's OWN per-variant conclusion actually establishes for it (e.g. "TET3
+Beck-Fahrner syndrome, which the patient's coloboma is consistent with" and,
+separately, "CDK20-related ciliopathy") — never restate the patient's own
+broad or compound phenotype wording as if it were a single shared diagnosis
+proven for every listed gene. If the per-variant conclusions support two
+distinct, mechanistically unrelated conditions rather than one, say so
+explicitly (e.g. "these findings support two independent diagnoses...") rather
+than merging them under one umbrella label.
+
 STEP 1 — PHASE CHECK (mandatory, do this first, before choosing a model):
 This step ONLY applies to a gene with TWO OR MORE DISTINCT candidate
 variants. Do NOT run it, and do NOT write a Phase check line, for a gene

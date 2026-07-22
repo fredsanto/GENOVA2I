@@ -1,0 +1,11 @@
+name: clinvar_residue_search
+description: "Deterministic ClinVar query for every classified variant at this variant's own protein residue(s) — grounds PS1/PM5."
+enabled: true
+
+order: 1
+parallel: true
+
+timeout: 15
+retry:
+  attempts: 2
+  backoff: 2.0

@@ -1,6 +1,10 @@
 Patient phenotype: {patient_phenotype}
 MOI-layer findings: {conclusions}
 
+ACMG SF actionable-gene findings (ground truth, computed independently of the
+layers above — use this list, do not re-derive actionable status yourself):
+{actionable_variants}
+
 TASK: Identify which MOI layer(s) and variant(s) jointly explain the patient's
 phenotype.
 
@@ -55,6 +59,19 @@ been excluded upstream (base layer's RECESSIVE SINGLE-HIT CHECK, and Layer
 5's Python TRANS gate never producing a block for it), but if one slipped
 through, exclude it here and state why.
 
+SCOPE RULE (mandatory — applies to the entire # Clinical Conclusion section
+below): the ONLY variants that may be named anywhere in this section are:
+  (a) causative variant(s) — section 2;
+  (b) ACMG SF actionable finding(s) from the ground-truth list above — section 3;
+  (c) VUS variant(s) whose OWN layer/base block states exactly 4 or 5 total
+      ACMG points — section 4.
+A variant classified Benign or Likely Benign — or a VUS with a point total
+outside 4-5 — must NEVER be named, listed, described, or even referenced as
+"excluded"/"not causative" anywhere in this section. Do not mention that such
+a variant exists, was considered, or was ruled out. Simply omit it entirely,
+as if it were never in the input. This rule overrides any instinct to be
+comprehensive — sections 2-4 below define the full and only scope.
+
 Then write the clinical conclusion.
 
 # Reasoning
@@ -101,10 +118,8 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    PMIDs, if cited; and why this variant (jointly with its trans partner,
    only for a RECESSIVE finding) explains the patient's phenotype.
 
-   Then, on its own line: **ACMG classification:** [classification] ([N] pts
-   total — the layer's own "Total ACMG points" value).
-
-   CRITERIA LIST — copy the criteria list for THIS SPECIFIC VARIANT directly
+   CRITERIA LIST (MANDATORY — write this BEFORE the ACMG classification line,
+   never skip it): copy the criteria list for THIS SPECIFIC VARIANT directly
    out of its own layer block above (both the "ACMG criteria" lines from its
    base conclusion AND, if this is a De Novo/Dominant-Inherited/Recessive/
    X-Linked layer block, whatever criterion that layer itself added). Do not
@@ -117,6 +132,20 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    Format each clause as "[CRITERION] ([Strength], +/-N pts):
    [one-sentence justification]", separated by semicolons. A bare
    comma-separated criteria list with no points is not sufficient.
+
+   A real past failure to not repeat: the prose paragraph above mentioned a
+   criterion in passing (e.g. "...a nonsense mutation in a gene where
+   loss-of-function is a known disease mechanism (PVS1)...") and the output
+   then jumped straight to "**ACMG classification:** Pathogenic (11 pts
+   total)" with no criteria list at all. A passing prose mention is NEVER a
+   substitute for this list — this list must appear as its own explicit
+   line(s), every single time, for every causative variant, with no
+   exceptions. An entry for a causative variant that ends with only an ACMG
+   classification line and no criteria list above it is incomplete and wrong.
+
+   Then, on its own line, after the criteria list above:
+   **ACMG classification:** [classification] ([N] pts
+   total — the layer's own "Total ACMG points" value).
 
    Fixed point values (Tavtigian et al. 2020) — use ONLY these values, never
    invent a different point value for a listed criterion:
@@ -138,11 +167,32 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
 
    [repeat the block above for each additional causative variant/layer]
 
-3) Summary: [one sentence tying together the gene(s), the MOI layer(s)
+3) Actionable findings (ACMG SF): list every variant in the ACMG SF
+   ground-truth list above, regardless of relevance to the patient's primary
+   phenotype and regardless of whether it is already named in section 2 —
+   ACMG SF findings are reportable purely on gene/pathogenicity, independent
+   of phenotype fit. For each: [GENE] ([HGVS]) — condition: [condition from
+   the ground-truth list]; classification: [classification from the
+   ground-truth list]. One sentence is enough per variant; do not repeat the
+   full section-2 prose paragraph even if the variant already appears there
+   — a brief cross-reference is enough (e.g. "See Section 2 above."). If the
+   ground-truth list says "None", write exactly: "None identified."
+
+4) Notable VUS (ACMG 4-5 points): scan every layer/base block above (not
+   just the ones already used in sections 2-3) for any variant whose OWN
+   block states a total ACMG point value of exactly 4 or 5 AND a
+   classification of "Uncertain significance" / "VUS". List each as [GENE]
+   ([HGVS]) — [N] pts, with a one-sentence justification copied from that
+   variant's own criteria list. Do not include a variant already listed in
+   section 2 as causative. If no such variant exists, write exactly: "None
+   identified."
+
+5) Summary: [one sentence tying together the gene(s), the MOI layer(s)
    involved, and ACMG classification(s) into a final overall finding — e.g.
    "These findings support a diagnosis of [condition] due to a de novo
    pathogenic variant in [GENE]" or, if multiple layers contributed, name
-   each. Ground it only in what sections 1-2 already state, no new evidence.]
+   each. Ground it only in what sections 1-2 already state, no new evidence.
+   Do not summarize sections 3-4 here — they stand on their own.]
 
 CITATIONS ARE MANDATORY, NOT OPTIONAL: every layer block above already
 contains inline (PMID:XXXXXXXX) and URL citations for its claims — when you

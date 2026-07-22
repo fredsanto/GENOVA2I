@@ -34,6 +34,18 @@ PLI_INTOLERANT_THRESHOLD = 0.9
 LOEUF_CONSTRAINED_THRESHOLD = 0.35
 
 
+def classify_pli(pli: float | None) -> str:
+    if pli is None:
+        return "not available"
+    return "LoF-intolerant" if pli >= PLI_INTOLERANT_THRESHOLD else "LoF-tolerant"
+
+
+def classify_loeuf(loeuf: float | None) -> str:
+    if loeuf is None:
+        return "not available"
+    return "constrained" if loeuf < LOEUF_CONSTRAINED_THRESHOLD else "unconstrained"
+
+
 class GnomadConstraintTool(NetworkTool):
     """
     Fetches pLI and LOEUF (oe_lof_upper) for a gene from gnomAD.
@@ -111,14 +123,12 @@ class GnomadConstraintTool(NetworkTool):
         lines = [f"GNOMAD GENE CONSTRAINT ({gene}, {reference_genome}):"]
 
         if pli is not None:
-            tag = "LoF-intolerant" if pli >= PLI_INTOLERANT_THRESHOLD else "LoF-tolerant"
-            lines.append(f"pLI = {pli:.3f} ({tag}, threshold pLI≥{PLI_INTOLERANT_THRESHOLD})")
+            lines.append(f"pLI = {pli:.3f} ({classify_pli(pli)}, threshold pLI≥{PLI_INTOLERANT_THRESHOLD})")
         else:
             lines.append("pLI = not available")
 
         if loeuf is not None:
-            tag = "constrained" if loeuf < LOEUF_CONSTRAINED_THRESHOLD else "unconstrained"
-            lines.append(f"LOEUF = {loeuf:.3f} ({tag}, threshold LOEUF<{LOEUF_CONSTRAINED_THRESHOLD})")
+            lines.append(f"LOEUF = {loeuf:.3f} ({classify_loeuf(loeuf)}, threshold LOEUF<{LOEUF_CONSTRAINED_THRESHOLD})")
         else:
             lines.append("LOEUF = not available")
 

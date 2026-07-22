@@ -31,6 +31,17 @@ PORT="${PORT:-8002}"
 VLLM_PORT="${VLLM_PORT:-38103}"
 PIPELINE_PORT="${PIPELINE_PORT:-8000}"
 
+# Python fully-buffers stdout when it's not a TTY (i.e. always, here — stdout
+# is redirected to server_qwen_<JOBID>.log by #SBATCH --output above). Plain
+# print() calls in the pipeline (normalizer.py's column-interpretation
+# summary, executor.py's per-tool progress, etc.) then sit in the buffer
+# instead of reaching the log file promptly — a run can be fully in progress
+# for many minutes while the log looks stalled, indistinguishable from an
+# actual hang. logging module calls are unaffected (they flush per record),
+# which is why access logs/vLLM-ready lines always showed up fine while plain
+# prints didn't. Forcing unbuffered I/O makes the log reflect real-time state.
+export PYTHONUNBUFFERED=1
+
 cd "$SERVERQWN_DIR" || exit 1
 
 # ── HPC software environment ──────────────────────────────────────────────────

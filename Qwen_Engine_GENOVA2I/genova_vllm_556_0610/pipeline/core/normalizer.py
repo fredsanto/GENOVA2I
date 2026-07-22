@@ -34,7 +34,8 @@ TARGET_COLUMNS = [
     "Variant", "Chromosome", "Position", "RS_ID", "Ref_seq", "Var_seq",
     "Type", "Transcript", "HGVS", "Zygosity", "Gene", "OMIM_phenotype",
     "OMIM_inheritance", "Inheritance", "ClinVar_class",
-    "Allelic_balance", "Frequency", "CADD_score",
+    "Allelic_balance", "Allelic_balance_mother", "Allelic_balance_father",
+    "Frequency", "CADD_score",
     "REVEL_score", "SIFT_score", "PolyPhen2_score", "AlphaMissense_score",
     "SpliceAI_score",
 ]
@@ -224,6 +225,77 @@ def _parse_spliceai_value(raw: str) -> str:
     return f"{max(deltas):.4f}"
 
 
+# PolyPhen-2 categorical prediction severity, worst-first tiebreak when no
+# numeric score is present in a compound annotation (ANNOVAR-style D/P/B calls).
+_POLYPHEN_CATEGORICAL_SEVERITY = {
+    "D": 3, "PROBABLY_DAMAGING": 3, "PROBABLYDAMAGING": 3,
+    "P": 2, "POSSIBLY_DAMAGING": 2, "POSSIBLYDAMAGING": 2,
+    "B": 1, "BENIGN": 1, "TOLERATED": 1,
+}
+
+
+def _parse_multivalue_score(raw: str, direction: str) -> str:
+    """
+    Collapse a compound multi-transcript score annotation (comma/semicolon/
+    pipe-delimited, possibly with 'None'/'.' placeholders from transcripts
+    the tool didn't score) down to the single most PATHOGENIC-leaning value
+    — same treatment as _parse_spliceai_value() for splice scores,
+    generalized to CADD/REVEL/SIFT/AlphaMissense. Different transcripts of
+    the same variant can score differently; taking the most damaging value
+    across them (rather than dropping the field as unparseable, or reading
+    only the first token) is the conservative choice for a pathogenicity
+    criterion — it never UNDER-calls deleteriousness that some transcript's
+    annotation actually supports.
+
+    direction: "high" if a HIGHER value is more pathogenic (CADD, REVEL,
+               AlphaMissense); "low" if a LOWER value is more pathogenic (SIFT).
+    """
+    if not raw or raw in ("NA", ".", "", "nan"):
+        return raw
+
+    tokens = re.split(r"[|,;]", raw)
+    if len(tokens) < 2:
+        return raw  # already a scalar
+
+    values = []
+    for t in tokens:
+        t = t.strip()
+        try:
+            values.append(float(t))
+        except ValueError:
+            continue  # 'None', blank, or non-numeric — skip, not a failure
+
+    if not values:
+        return raw  # nothing numeric found — leave as-is (caller may retry as categorical)
+
+    chosen = max(values) if direction == "high" else min(values)
+    return f"{chosen:.4g}"
+
+
+def _parse_polyphen2_value(raw: str) -> str:
+    """
+    PolyPhen-2 needs its own wrapper: numeric compound strings reduce like
+    any other high-is-worse score, but ANNOVAR-style categorical (D/P/B)
+    compound strings ("D,D,P,B") have no numeric form to parse at all —
+    reduce those to the single worst category present instead.
+    """
+    numeric = _parse_multivalue_score(raw, direction="high")
+    if numeric != raw:
+        return numeric  # successfully reduced numerically
+
+    if not raw or raw in ("NA", ".", "", "nan"):
+        return raw
+    tokens = [t.strip().upper() for t in re.split(r"[|,;]", raw) if t.strip()]
+    if len(tokens) < 2:
+        return raw
+    scored = [(t, _POLYPHEN_CATEGORICAL_SEVERITY.get(t)) for t in tokens]
+    scored = [(t, s) for t, s in scored if s is not None]
+    if not scored:
+        return raw
+    worst_token, _ = max(scored, key=lambda pair: pair[1])
+    return worst_token
+
+
 def _parse_aachange(raw: str) -> str:
     """Extract a display HGVS string from ANNOVAR AAChange annotation."""
     if not raw or raw in ("NA", ".", "", "nan"):
@@ -318,13 +390,47 @@ _FIELD_DESCRIPTIONS = {
     "OMIM_inheritance":    "OMIM-reported inheritance mode text",
     "Inheritance":         "inheritance mode, e.g. AR/AD/XLR/XLD",
     "ClinVar_class":       "ClinVar clinical significance/classification",
-    "Allelic_balance":     "the PROBAND's own allelic balance / variant allele fraction (a single float, typically 0-1). Do NOT map any column matching \"Allelic balance - <sample>\" here — those are handled separately.",
+    "Allelic_balance":     "the PROBAND's own allelic balance / variant allele fraction (a single float, typically 0-1). "
+                           "When a file has multiple allelic-balance-style columns (trio data), this is whichever one "
+                           "represents the PROBAND/index case specifically — by explicit naming (\"proband\", \"index\", "
+                           "\"affected\") if present, else the FIRST allelic-balance column in the file's own column order.",
+    "Allelic_balance_mother": "the MOTHER's own allelic balance / variant allele fraction for this same variant, "
+                           "when the file provides trio (proband+parents) data as separate columns. Column naming "
+                           "varies widely and is NOT limited to any fixed pattern — match ANY column that is clearly "
+                           "a second/third allelic-balance-style column belonging to a parent, regardless of exact "
+                           "wording: explicit naming (\"mother\", \"mom\", \"maternal\", \"AB_mom\"), a family/sample-ID "
+                           "suffix that differs from the proband's own ID, or a purely positional/numbered suffix with "
+                           "no explicit parent wording at all (e.g. \"Allelic_balance_1\", \"AF_sample2\", \"VAF_2\"). "
+                           "When there is no explicit naming to tell mother from father apart (e.g. bare numbered "
+                           "suffixes), use the file's own column order as the tiebreaker: proband first, then mother, "
+                           "then father — i.e. the first non-proband allelic-balance column is the mother's. Only "
+                           "applies when there are 2+ non-proband allelic-balance columns; leave null for a single-"
+                           "sample file.",
+    "Allelic_balance_father": "the FATHER's own allelic balance / variant allele fraction — same matching rules as "
+                           "Allelic_balance_mother above (explicit naming, sample-ID suffix, or positional fallback), "
+                           "but for the father: when naming gives no explicit parent identity, this is the LAST "
+                           "allelic-balance column in file order (after proband and mother). Only applies when there "
+                           "are 3 total allelic-balance columns (proband + both parents); leave null otherwise.",
     "Frequency":           "population allele frequency, e.g. gnomAD/ExAC/1000G",
-    "CADD_score":          "CADD Phred-scaled deleteriousness score",
-    "REVEL_score":         "REVEL pathogenicity score",
-    "SIFT_score":          "SIFT score or prediction (damaging/tolerated)",
-    "PolyPhen2_score":     "PolyPhen-2 score or prediction",
-    "AlphaMissense_score": "AlphaMissense pathogenicity score",
+    "CADD_score":          "CADD Phred-scaled deleteriousness score. Column naming varies widely across "
+                           "uploads — match ANY column whose name is clearly a CADD variant regardless of "
+                           "separator/case/wording: \"CADD score\", \"CADD-Score\", \"CADD_Score\", \"cadd\", "
+                           "\"CADD_phred\", \"CADD PHRED\", \"CADD_v17_PHRED\". Do NOT match \"CADD_raw\" or "
+                           "\"CADD_raw_rankscore\" (or similarly-named \"raw\"/\"rankscore\" variants) — those "
+                           "are different internal sub-metrics, not the interpretable Phred-scaled score this "
+                           "field means. If both a plain/phred CADD column and a raw/rankscore CADD column are "
+                           "present, map only the plain/phred one here.",
+    "REVEL_score":         "REVEL pathogenicity score. Match any naming variant regardless of separator/case: "
+                           "\"REVEL score\", \"REVEL-Score\", \"revel\", \"REVEL_score\".",
+    "SIFT_score":          "SIFT score or prediction (damaging/tolerated). Match any naming variant regardless "
+                           "of separator/case: \"Sift score\", \"SIFT-Score\", \"sift\", \"SIFT_pred\", "
+                           "\"SIFT_converted_rankscore\". If both a SIFT score and a separate SIFT prediction/"
+                           "pred column exist, prefer the score column.",
+    "PolyPhen2_score":     "PolyPhen-2 score or prediction. Match any naming variant regardless of separator/"
+                           "case: \"PolyPhen2 score\", \"Polyphen-2\", \"polyphen2_hdiv_score\", "
+                           "\"Polyphen2_HVAR_pred\".",
+    "AlphaMissense_score": "AlphaMissense pathogenicity score. Match any naming variant regardless of "
+                           "separator/case: \"AlphaMissense score\", \"alphamissense\", \"am_pathogenicity\".",
     "SpliceAI_score":      "precomputed splicing-impact prediction for this variant, from SpliceAI, dbscSNV "
                            "(ada_score/rf_score ensemble prediction), or any similar splice-effect tool. May "
                            "appear as a single score (e.g. \"0.87\"), a semicolon-pair (e.g. dbscSNV's "
@@ -344,6 +450,17 @@ _HEADER_INTERPRETATION_SYSTEM = (
     "match — use null for a field if none of the columns genuinely fit it. Each "
     "original column may be used for AT MOST one field (pick the best match if "
     "several fields look similar).\n\n"
+    "IMPORTANT — column names vary a great deal across uploads and NEVER require an "
+    "exact string match to a canonical field name. The same field routinely shows up "
+    "with different separators (space/underscore/hyphen), casing, or abbreviation — "
+    "e.g. \"CADD score\", \"CADD-Score\", \"CADD_Score\", and \"cadd\" all mean the same "
+    "thing as canonical field CADD_score. Match on MEANING, not spelling: recognize the "
+    "underlying tool/metric a column is named after even when its exact wording differs "
+    "from the canonical field name below. The per-field notes call out specific naming "
+    "variants and any sub-metric qualifiers (e.g. \"_raw\", \"_rankscore\") that should "
+    "NOT be matched even though they share the same tool name — read those carefully, "
+    "since a raw/internal sub-metric is a different value from the interpretable score "
+    "the canonical field means.\n\n"
     "Canonical fields:\n"
     + "\n".join(f"  - {name}: {desc}" for name, desc in _FIELD_DESCRIPTIONS.items())
     + "\n\nOutput ONLY a single JSON object whose KEYS are EXACTLY the canonical "
@@ -358,10 +475,17 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
     """
     SLM-driven replacement for _map_columns_old(): asks the model to classify
     each header into a TARGET_COLUMNS field, using one sample data row for
-    disambiguation. Columns matching the structural "Allelic balance - <sample>"
-    pattern are handled deterministically beforehand (unambiguous, mechanical —
-    not worth spending model judgment on) exactly as _map_columns_old() did;
-    only the remaining columns are sent to the model.
+    disambiguation. This INCLUDES allelic-balance columns (proband, mother,
+    father) — previously a hardcoded regex (`^allelic\\s+balance\\s*-`) claimed
+    these deterministically before the model ever saw them, and, being
+    space-strict, silently failed on any other naming convention (verified:
+    a real upload used "Allelic_balance_1"/"Allelic_balance_2" and every one
+    of those columns came back "(unmapped)", silently discarding trio
+    parental data for every variant in that file). The model now classifies
+    ALL header columns itself, including these — see the
+    Allelic_balance/Allelic_balance_mother/Allelic_balance_father entries in
+    _FIELD_DESCRIPTIONS for the matching rules (explicit naming, sample-ID
+    suffix, or positional fallback when naming gives no parent identity).
 
     Returns (renamed_df, human_readable_summary) — the summary is meant to be
     shown to the user (SSE + final report) so they can see what the model
@@ -373,10 +497,6 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
     claimed: set[str] = set()
     mapping: dict[str, str] = {}
 
-    # ── Deterministic pass: sample-specific allelic-balance columns ──────────
-    _ab_pattern = re.compile(r"^allelic\s+balance\s*-", re.IGNORECASE)
-    ab_found = False
-
     # ── Deterministic pass: raw headers that already literally match a
     # canonical field name (e.g. a "Frequency" or "Chromosome" column already
     # named exactly that). Auto-claimed and excluded from the SLM pass —
@@ -386,16 +506,24 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
     # two columns both named "Frequency" after rename. pandas then raises
     # "cannot reindex on an axis with duplicate labels" the first time
     # anything downstream selects that column by name.
-    _target_by_lower = {f.lower(): f for f in TARGET_COLUMNS}
+    #
+    # Deliberately EXACT-only, not fuzzy/normalized — column naming in the
+    # wild varies too much (CADD score / CADD-Score / CADD_Score / cadd /
+    # CADD_Phred / ...) for a hardcoded separator-normalization rule to
+    # generalize; that recognition job belongs to the SLM pass below, which
+    # is given explicit naming-variant examples for exactly this reason. Note
+    # this exact-match fast path is intentionally NOT applied to
+    # "Allelic_balance" itself — a file can have several allelic-balance-style
+    # columns (trio), and which one is the proband/mother/father needs the
+    # same model judgment as any other trio-naming variant, not a first-match
+    # shortcut.
+    _target_by_lower = {
+        f.lower(): f for f in TARGET_COLUMNS
+        if f not in ("Allelic_balance", "Allelic_balance_mother", "Allelic_balance_father")
+    }
 
     llm_cols: list[str] = []
     for col in df.columns:
-        if _ab_pattern.match(col):
-            if not ab_found and "Allelic_balance" not in claimed:
-                mapping[col] = "Allelic_balance"
-                claimed.add("Allelic_balance")
-                ab_found = True
-            continue
         exact_field = _target_by_lower.get(col.strip().lower())
         if exact_field and exact_field not in claimed:
             if col != exact_field:
@@ -406,9 +534,6 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
 
     # ── SLM pass: everything else ─────────────────────────────────────────────
     summary_lines = ["Column header interpretation (SLM-driven):"]
-    if ab_found:
-        ab_source = next(c for c, v in mapping.items() if v == "Allelic_balance")
-        summary_lines.append(f"  {ab_source!r:<30} -> Allelic_balance (proband; structural match)")
 
     if llm_cols:
         sample_row = {}
@@ -460,9 +585,20 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
 
         for col in llm_cols:
             target = mapping.get(col)
-            summary_lines.append(
-                f"  {col!r:<30} -> {target}" if target else f"  {col!r:<30} -> (unmapped)"
-            )
+            if target:
+                note = f"  {col!r:<30} -> {target}"
+            elif "allelic balance" in col.lower():
+                # Not a red flag: this column isn't unused, it's just not the
+                # canonical single-value Allelic_balance field. Parental AB
+                # columns (proband/mother/father, however many/whatever named)
+                # are extracted separately by extract_parental_ab() and appear
+                # in SEGREGATION ANALYSIS, not here — a bare "(unmapped)" for
+                # a second/third allelic-balance column reads as dropped data
+                # when it's actually just handled by a different code path.
+                note = f"  {col!r:<30} -> (handled separately — parental allelic balance, see SEGREGATION ANALYSIS)"
+            else:
+                note = f"  {col!r:<30} -> (unmapped)"
+            summary_lines.append(note)
 
     summary = "\n".join(summary_lines)
     print(f"[csv_normalizer] {summary}")
@@ -518,6 +654,17 @@ def _build_normalized_df(df: pd.DataFrame, df_original: pd.DataFrame) -> pd.Data
     # column was named) down to a single max delta score
     out["SpliceAI_score"] = out["SpliceAI_score"].apply(_parse_spliceai_value)
 
+    # Same treatment for the other in-silico predictors: a multi-transcript
+    # compound annotation (e.g. "0.007,0.001,0.003,0.005,0.004,0.005" or
+    # "None,None,0.766,0.766,0.766,None") collapses to the single most
+    # pathogenic-leaning value across transcripts, rather than being left
+    # unparseable (which silently drops real evidence from PP3 downstream).
+    out["CADD_score"]          = out["CADD_score"].apply(lambda v: _parse_multivalue_score(v, "high"))
+    out["REVEL_score"]         = out["REVEL_score"].apply(lambda v: _parse_multivalue_score(v, "high"))
+    out["AlphaMissense_score"] = out["AlphaMissense_score"].apply(lambda v: _parse_multivalue_score(v, "high"))
+    out["SIFT_score"]          = out["SIFT_score"].apply(lambda v: _parse_multivalue_score(v, "low"))
+    out["PolyPhen2_score"]     = out["PolyPhen2_score"].apply(_parse_polyphen2_value)
+
     return out
 
 
@@ -555,10 +702,45 @@ def _parent_label_from_name(col: str) -> str | None:
     return None
 
 
+def _build_parental_ab_from_mapped(df: pd.DataFrame) -> list[dict] | None:
+    """
+    Build parental_ab directly from the LLM's own header classification —
+    Allelic_balance / Allelic_balance_mother / Allelic_balance_father are now
+    canonical TARGET_COLUMNS fields the model maps like any other (see their
+    entries in _FIELD_DESCRIPTIONS for the matching rules: explicit naming,
+    sample-ID suffix, or positional fallback). This is the PRIMARY path —
+    unlike a fixed regex, the model isn't tied to one naming convention.
+
+    Returns None if the proband's own Allelic_balance column wasn't found at
+    all (nothing to build from here — caller falls back to the regex-based
+    extract_parental_ab() as a safety net).
+    """
+    if "Allelic_balance" not in df.columns or (df["Allelic_balance"] == "NA").all():
+        return None
+
+    has_mother = "Allelic_balance_mother" in df.columns and not (df["Allelic_balance_mother"] == "NA").all()
+    has_father = "Allelic_balance_father" in df.columns and not (df["Allelic_balance_father"] == "NA").all()
+
+    result = []
+    for _, row in df.iterrows():
+        entry = {"proband": row["Allelic_balance"]}
+        if has_mother:
+            entry["mother"] = row["Allelic_balance_mother"]
+        if has_father:
+            entry["father"] = row["Allelic_balance_father"]
+        result.append(entry)
+
+    print(f"[csv_normalizer] Parental AB from SLM header mapping: "
+          f"proband{'+mother' if has_mother else ''}{'+father' if has_father else ''}")
+    return result
+
+
 def extract_parental_ab(df: pd.DataFrame) -> list[dict] | None:
     """
-    Detect columns containing "Allelic balance" in the header and extract
-    per-variant allelic balance values.
+    FALLBACK path only — used when _build_parental_ab_from_mapped() finds no
+    proband Allelic_balance column in the model's own mapping. Detects
+    columns containing "Allelic balance" in the header directly via regex
+    and extracts per-variant allelic balance values.
 
     Column naming convention: "Allelic balance - SAMPLE_ID"
     Order is always: proband first, then parents (if present).
@@ -570,22 +752,17 @@ def extract_parental_ab(df: pd.DataFrame) -> list[dict] | None:
           - 3 columns: {"proband": "0.48", "mother": "0.51", "father": "0.00"}
         Or None if no matching columns found.
     """
-    # Find all columns with "allelic balance" (case-insensitive substring)
+    # Find all columns with "allelic balance" (case-insensitive, separator-
+    # insensitive substring — a real input file used "Allelic_balance_1"/
+    # "Allelic_balance_proband" (underscore, not space) and the literal-space
+    # check below silently matched zero columns, discarding trio parental
+    # data for EVERY variant in that run, not just one. Normalize whitespace/
+    # underscore/hyphen runs to a single space first, same fix already
+    # applied in _parent_label_from_name() below for the same reason.
     ab_cols = [
         str(c) for c in df.columns
-        if "allelic balance" in str(c).lower()
+        if "allelic balance" in re.sub(r"[_\-\s]+", " ", str(c).lower())
     ]
-
-    # Debug: write all column names and AB detection to file
-    with open("/tmp/ab_debug.txt", "a") as _dbg:
-        _dbg.write(f"\n=== extract_parental_ab debug ===\n")
-        _dbg.write(f"All columns ({len(df.columns)}):\n")
-        for i, c in enumerate(df.columns):
-            _dbg.write(f"  {i}: [{c}]\n")
-        _dbg.write(f"AB cols found ({len(ab_cols)}):\n")
-        for c in ab_cols:
-            _dbg.write(f"  [{c}]\n")
-        _dbg.write(f"ab_cols = {ab_cols}\n")
 
     if not ab_cols:
         return None
@@ -685,14 +862,19 @@ def normalize_upload(
     # ── Normalize ─────────────────────────────────────────────────────────────
     df_original = df.copy()          # preserve original before column mapping
 
-    # Extract parental allelic balance BEFORE column mapping (uses raw headers)
-    parental_ab = extract_parental_ab(df_original)
-
     df, header_mapping_summary = _map_columns_llm(df, llm)
     df = _build_normalized_df(df, df_original)
 
     if df.empty:
         raise ValueError("No variant rows found after normalization.")
+
+    # Parental allelic balance: primarily from the SLM's own header mapping
+    # (Allelic_balance_mother/_father — handles whatever naming convention the
+    # file uses), falling back to the regex-based extract_parental_ab() only
+    # if the SLM found no proband AB column at all.
+    parental_ab = _build_parental_ab_from_mapped(df)
+    if parental_ab is None:
+        parental_ab = extract_parental_ab(df_original)
 
     variants  = _df_to_variant_dicts(df)
     raw_rows  = _extract_raw_fields(df_original)

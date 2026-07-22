@@ -570,7 +570,17 @@ class LitVar2SummaryTool(SLMTool):
             "If no abstract contains relevant evidence, write one sentence saying so. "
             "Do NOT use bullet points, headers, or raw URLs. "
             "Do NOT mention abstracts or papers explicitly, just report the findings naturally. "
-            "Begin directly with the summary."
+            "Begin directly with the summary. "
+            "CRITICAL — do not manufacture relevance: report only what the abstracts EXPLICITLY "
+            "state. If the research question asks about a specific phenotype and the abstracts "
+            "describe a DIFFERENT phenotype (e.g. abstracts describe intellectual "
+            "disability/epilepsy but the research question asks about visual impairment), say "
+            "plainly that no evidence links this gene/variant to that specific phenotype — do "
+            "NOT bridge the gap yourself with inferential language ('may indicate', 'suggests "
+            "potential for', 'broader phenotype', 'could plausibly include') to imply a "
+            "connection that no abstract actually makes. A hedge you invent reads as evidence "
+            "to whoever uses this summary next and can produce a wrong diagnosis — when the "
+            "phenotype match isn't explicitly stated, say there is none, full stop."
             f"{functional_clause}"
         )
         user = (

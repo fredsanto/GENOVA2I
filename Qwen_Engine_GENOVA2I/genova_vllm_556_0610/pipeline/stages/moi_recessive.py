@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pipeline.core.citations import validate_citations
+from pipeline.core.clinvar_reference import append_clinvar_reference, append_clinvar_references
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -147,7 +148,11 @@ def run_pair(
         max_tokens=MAX_NEW_TOKENS_RECESSIVE,
     )
     full_context = variant_a_context + "\n" + variant_b_context + "\n" + variant_a_base_conclusion + "\n" + variant_b_base_conclusion
-    return validate_citations(result, full_context)
+    result = validate_citations(result, full_context)
+    return append_clinvar_references(result, [
+        (variant_a_label, variant_a_context + "\n" + variant_a_base_conclusion),
+        (variant_b_label, variant_b_context + "\n" + variant_b_base_conclusion),
+    ])
 
 
 def run_solo(
@@ -203,4 +208,5 @@ def run_solo(
         max_tokens=MAX_NEW_TOKENS_RECESSIVE_SOLO,
     )
     full_context = variant_context + "\n" + variant_base_conclusion
-    return validate_citations(result, full_context)
+    result = validate_citations(result, full_context)
+    return append_clinvar_reference(result, full_context)

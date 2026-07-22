@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pipeline.core.citations import validate_citations
+from pipeline.core.clinvar_reference import append_clinvar_reference
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -95,4 +96,6 @@ def run_one(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_DOMINANT,
     )
-    return validate_citations(result, variant_context + "\n" + base_conclusion)
+    full_context = variant_context + "\n" + base_conclusion
+    result = validate_citations(result, full_context)
+    return append_clinvar_reference(result, full_context)

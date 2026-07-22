@@ -12,7 +12,7 @@ parallel: true
 # if it recognizes it. Skip the live API call when that's already populated.
 gate:
   field: SpliceAI_score
-  operator: not_na
+  operator: na
 
 compress:
   enabled: true

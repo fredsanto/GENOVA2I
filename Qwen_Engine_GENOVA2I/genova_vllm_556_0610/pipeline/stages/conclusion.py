@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pipeline.core.citations import validate_citations
+from pipeline.core.acmg_pp3 import validate_pp3
+from pipeline.core.acmg_pp2_bp1 import validate_pp2_bp1
+from pipeline.core.acmg_ps1_pm5 import validate_ps1_pm5
+from pipeline.core.acmg_bp6 import validate_bp6
+from pipeline.core.acmg_pp4 import validate_pp4
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -89,4 +94,9 @@ def run_one(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_REPORT,
     )
-    return validate_citations(result, variant_context)
+    result = validate_citations(result, variant_context)
+    result = validate_pp3(result, variant_context)
+    result = validate_pp2_bp1(result, variant_context)
+    result = validate_ps1_pm5(result, variant_context)
+    result = validate_bp6(result)
+    return validate_pp4(result)

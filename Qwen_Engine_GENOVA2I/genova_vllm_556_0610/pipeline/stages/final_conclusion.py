@@ -64,11 +64,28 @@ def _build_layers_text(layer_outputs: dict[str, list[str]], unclassified_conclus
     return "\n\n---\n\n".join(parts)
 
 
+def _build_actionable_text(actionable_variants: list[dict] | None) -> str:
+    """Render the ACMG SF actionable-variant list (ground truth for the
+    Clinical Conclusion's own "Actionable findings" section) as plain lines
+    of gene/HGVS/condition/classification — or an explicit "None" line so the
+    model never has to guess whether the list was simply omitted."""
+    if not actionable_variants:
+        return "None — no variant in this run met ACMG SF actionable-gene criteria."
+    lines = []
+    for v in actionable_variants:
+        lines.append(
+            f"- {v['gene']} ({v['hgvs']}) — condition: {v['condition']}; "
+            f"zygosity: {v['zygosity']}; classification: {v['classification']}"
+        )
+    return "\n".join(lines)
+
+
 def run(
     layer_outputs: dict[str, list[str]],
     unclassified_conclusions: list[str],
     patient_phenotype: str,
     llm: "LLMClient",
+    actionable_variants: list[dict] | None = None,
 ) -> str:
     """
     Cross-MOI clinical conclusion synthesis (Layer 8).
@@ -83,6 +100,11 @@ def run(
                            variants whose gene MOI never resolved to any layer.
         patient_phenotype: Free-text patient phenotype string from the request.
         llm:               Shared LLMClient instance.
+        actionable_variants: ACMG SF actionable-gene findings (gene, hgvs,
+                           condition, zygosity, classification dicts) — ground
+                           truth for the Clinical Conclusion's own "Actionable
+                           findings" section, computed independently upstream
+                           (pipeline.py's acmg_sf.build_actionable_set).
 
     Returns:
         The "# Clinical Conclusion" section, now naming which MOI layer(s)
@@ -100,10 +122,13 @@ def run(
         )
         conclusions_text = conclusions_text[:_MAX_CONCLUSIONS_CHARS] + "\n\n[... truncated ...]"
 
+    actionable_text = _build_actionable_text(actionable_variants)
+
     template    = _load_prompt()
     user_prompt = (template
         .replace("{patient_phenotype}", patient_phenotype)
-        .replace("{conclusions}", conclusions_text))
+        .replace("{conclusions}", conclusions_text)
+        .replace("{actionable_variants}", actionable_text))
 
     draft = llm.generate(
         system="You are an expert clinical geneticist. Limit your response to 1000 words maximum.",
@@ -119,7 +144,9 @@ def run(
     # /chat follow-up endpoint, which reliably corrects these when asked directly.
     revise_template = _load_prompt(_REVISE_PROMPT_PATH)
     revise_prompt = (revise_template
+        .replace("{patient_phenotype}", patient_phenotype)
         .replace("{conclusions}", conclusions_text)
+        .replace("{actionable_variants}", actionable_text)
         .replace("{draft}", draft))
 
     try:

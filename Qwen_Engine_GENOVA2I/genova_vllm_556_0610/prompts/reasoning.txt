@@ -43,12 +43,17 @@ Reasoning steps:
    autosomal recessive (or AD/AR) — evaluate this variant jointly with the sibling
    rather than in isolation: note the sibling's HGVS, zygosity, and evidence, and
    state whether the pair is consistent with a compound heterozygous or homozygous
-   recessive presentation (including phase, if allelic balance data indicates it).
-   HARD RULE: if allelic balance data confirms both variants were inherited from the
-   SAME parent (cis, same allele), the pair is NOT compound heterozygous — one
-   parental allele carries both variants, the other parental allele is wild-type,
-   so this does not satisfy a biallelic/recessive model. State this explicitly and
-   do not describe the pair as compound heterozygous in that case.
+   recessive presentation. Phase (CIS/TRANS/UNKNOWN) is a backend-determined fact —
+   copy it verbatim from the sibling block's "Phase vs this variant
+   (backend-determined): ..." line. Do NOT compute CIS/TRANS yourself from the raw
+   allelic-balance numbers in the evidence — treat the backend line as the sole
+   source of truth for phase, even if your own reading of the AB numbers suggests
+   otherwise.
+   HARD RULE: if the backend-determined phase is CIS (same parent), the pair is NOT
+   compound heterozygous — one parental allele carries both variants, the other
+   parental allele is wild-type, so this does not satisfy a biallelic/recessive
+   model. State this explicitly and do not describe the pair as compound
+   heterozygous in that case.
 
 5. Call confidence & parental segregation:
    - Proband allelic balance (own AB, from the Allelic_balance field or "Proband:"
@@ -100,13 +105,24 @@ Reasoning steps:
      re-derive or guess this from other evidence — state exactly what that block
      says, including if it says the mode is unknown.
    - Second variant in gene (compound-het check): If a "SIBLING VARIANT(S) IN SAME
-     GENE" block is present above, this row is relevant — write "Yes — <sibling
-     HGVS>, zygosity <sibling zygosity>" and name it. If no sibling block is
-     present, write "No second variant in gene" if the gene is AR/XLR and this
-     variant is heterozygous (i.e. the check was performed and found nothing), or
-     "Not applicable — <reason>" if the check does not apply (e.g. gene is
-     dominant, or this variant itself is homozygous and already accounts for the
-     recessive disease alone).
+     GENE" block is present above, this row is relevant. Each sibling entry there
+     carries its own "Phase vs this variant (backend-determined): CIS|TRANS|
+     UNKNOWN ..." line — copy that phase verbatim; do NOT re-derive CIS/TRANS
+     yourself from the raw allelic-balance numbers (a real past failure: two
+     separate reasoning calls for the same gene pair, each looking at the pair
+     from one variant's own side, computed CONTRADICTORY phase from the same
+     underlying data — one call said the pair was CIS, the other said TRANS for
+     the identical two variants — because each was left to eyeball the AB values
+     itself instead of deferring to the one backend-computed answer). Write
+     "Yes — <sibling HGVS>, zygosity <sibling zygosity>, phase <CIS|TRANS|
+     UNKNOWN, copied from the backend-determined line above>". If the backend
+     phase is CIS, state plainly that this is NOT compound heterozygous
+     regardless of how strong either variant's evidence looks. If no sibling
+     block is present, write "No second variant in gene" if the gene is AR/XLR
+     and this variant is heterozygous (i.e. the check was performed and found
+     nothing), or "Not applicable — <reason>" if the check does not apply (e.g.
+     gene is dominant, or this variant itself is homozygous and already accounts
+     for the recessive disease alone).
 
 Rules:
 - Make the reasoning explicit and step-by-step.
