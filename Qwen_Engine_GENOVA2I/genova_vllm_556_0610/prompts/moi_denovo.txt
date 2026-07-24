@@ -4,7 +4,7 @@ This variant's gene has a dominant-relevant inheritance mode (AD, AD_AR, or
 XLD). This layer checks specifically for DE NOVO occurrence — do NOT
 re-evaluate or re-score anything already covered in the BASE CONCLUSION below
 (molecular mechanism, frequency, in-silico evidence, PVS1/PM1/PM2/PM5/PP3/PP4/
-BA1/BS1/BS4/BP1/BP7). This layer only ADDS a de-novo-specific criterion on top
+BA1/BS1/BS2/BS4/BP1/BP7). This layer only ADDS a de-novo-specific criterion on top
 of that base score.
 
 BASE CONCLUSION (already scored — ground truth, do not recompute):

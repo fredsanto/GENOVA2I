@@ -190,6 +190,20 @@ def _make_sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+def _report_header(filename: str, phenotype: str) -> str:
+    """Leading block naming the input file and phenotype used for this run,
+    so a saved report.txt is self-identifying without cross-referencing
+    the results/ directory timestamp against the original upload."""
+    sep = "=" * 60
+    return (
+        f"{sep}\n"
+        f"INPUT\n"
+        f"{sep}\n"
+        f"File: {filename}\n"
+        f"Patient phenotype: {phenotype}\n\n"
+    )
+
+
 async def _run_proxy(job_id: str, csv_bytes: bytes, filename: str, phenotype: str):
     """Call the existing pipeline server and stream the result."""
     global _active_job_id
@@ -222,7 +236,7 @@ async def _run_proxy(job_id: str, csv_bytes: bytes, filename: str, phenotype: st
 
             response = await client.post(url, files=files, data=data)
             response.raise_for_status()
-            result = response.text
+            result = _report_header(filename, phenotype) + response.text
     except httpx.ConnectError:
         heartbeat.cancel()
         await _push_event(job_id, {
@@ -451,6 +465,8 @@ async def _run_direct(job_id: str, csv_bytes: bytes, filename: str, phenotype: s
         _reasoning_mod.run_second_triage = _orig_second_triage
         _conclusion_mod.run_one          = _orig_conclusion
         pipeline_obj._executor.run_variant = _orig_run_variant
+
+    report = _report_header(filename, phenotype) + report
 
     stem      = Path(filename).stem
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

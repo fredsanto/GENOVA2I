@@ -28,7 +28,49 @@ TASK: Check the draft above against the MOI-layer findings for factual
 contradictions, then output a corrected version.
 
 Specifically check for:
-- CRITERIA LIST COMPLETENESS CHECK (mandatory, do this FIRST, for every
+- VARIANT IDENTITY VERBATIM CHECK (mandatory, do this FIRST, for every variant
+  named anywhere in the draft — sections 2, 3, and 4): compare the draft's
+  [GENE] ([HGVS]) string against that exact variant's own layer/base block
+  header line above, character for character (chromosome/position/ref/alt,
+  transcript, cDNA change, and protein change all included). A real past
+  failure: the source block's own header read "c.1524G>A:p.W508X"
+  (nonsense/stop-gain — the same block's PVS1 justification explicitly cites
+  NMD) and the draft wrote "c.1524G>A; p.Glu508Lys" — a fabricated missense
+  change contradicting the block's own PVS1 reasoning two sentences later. Any
+  character-level mismatch in the HGVS/protein notation, however minor it
+  looks (one amino acid, one digit, one nucleotide), is a HARD ERROR — replace
+  it with the source block's exact string. Do this independently of every
+  other check below; a variant can have a perfectly correct ACMG writeup and
+  still fail this check on its identity string alone.
+- MISSING ACMG CRITERIA / RE-SCORE CHECK (mandatory, do this for every variant
+  listed in section 2 or 4): re-read that variant's OWN full layer/base block
+  above in its entirety (prose paragraph, Comment, every field — not just its
+  "ACMG criteria:" list) for any statement of evidence that supports a
+  criterion NOT already present in the draft's criteria list for that variant
+  — most commonly PM2 (population absence/rarity), but check all of PVS1/
+  PS1-4/PM1-6/PP1-5/BA1/BS1-4/BP1-7 the same way. A real past failure: a
+  variant's own block Comment stated verbatim "The variant is absent from
+  population databases, supporting its rarity and pathogenicity" — a direct
+  PM2 justification — yet PM2 was absent from that same block's criteria list
+  and absent from the draft. If you find evidence in a variant's own block
+  text that plainly supports a criterion missing from its criteria list: (1)
+  add that criterion to the draft's criteria list for that variant, with the
+  correct fixed point value from the table below and a justification quoting
+  the block's own supporting text; (2) recompute that variant's total ACMG
+  points (old total + the added criterion's value) and update the **ACMG
+  classification:** line to match the new total and threshold; (3) if the new
+  total crosses the >=6 causative threshold and this variant is not already in
+  section 2, move it there per the CAUSATIVE THRESHOLD RULE; (4) update
+  section 5's summary sentence if the classification label changed (e.g.
+  Uncertain Significance → Likely Pathogenic). Only add a criterion when its
+  supporting evidence is explicitly stated in that variant's own block text —
+  never add one from general plausibility or gene/disease familiarity alone,
+  same grounding bar as every other criterion in this report. Fixed point
+  values (Tavtigian et al. 2020) for the added criterion:
+    PVS1=+8 (VeryStrong) | PS1/PS2/PS3/PS4=+4 (Strong) |
+    PM1/PM2/PM3/PM5/PM6=+2 (Moderate) | PP1/PP3/PP4=+1 (Supporting) |
+    BA1=-8 (Standalone) | BS1/BS2/BS4=-4 (Strong) | BP1/BP7=-1 (Supporting)
+- CRITERIA LIST COMPLETENESS CHECK (mandatory, for every
   variant listed in section 2): a real past failure — the draft's section 2
   paragraph mentioned a criterion in passing prose (e.g. "...a nonsense
   mutation in a gene where loss-of-function is a known disease mechanism
@@ -55,6 +97,37 @@ Specifically check for:
   block states.
 - Any other factual claim in the draft not traceable to the layer findings
   above.
+- EXCLUDED-VARIANT PHENOTYPE-MATCH CHECK (mandatory, do this for every gene
+  the draft's Reasoning/STEP 0 section describes as NOT matching the
+  phenotype, lacking phenotype specificity, or otherwise not explaining the
+  presentation — even when that gene is correctly excluded from section 2):
+  read that gene's OWN layer/base block above and check whether it lists
+  PP4 among its applied criteria. A real past failure: the draft wrote
+  "homozygous GENE_X findings ... without phenotype match, failing to
+  explain the [phenotype]" for a gene whose own block explicitly applied
+  "PP4 Supporting (+1 pts): Patient phenotype ... is highly specific for
+  GENE_X-associated disease" a few paragraphs earlier in the same layer
+  findings — a direct self-contradiction. If the excluded gene's own block
+  DOES apply PP4, the draft may still exclude it from section 2 (e.g. for
+  insufficient segregation, weaker overall classification, or a competing
+  stronger finding), but it MUST NOT claim "no phenotype match" — rewrite
+  that sentence to state the real reason for exclusion (e.g. missing
+  segregation/PM3 confirmation, lower point total than the chosen variant)
+  instead of a phenotype-match denial the layer block itself contradicts.
+- MOI-LAYER TAG CONFIRMATION CHECK (mandatory, do this for every variant in
+  section 2 tagged "De novo" or "Dominant-inherited"): a variant is routed
+  into the DE NOVO LAYER or DOMINANT-INHERITED LAYER simply because its gene
+  is AD/AD_AR/XLD — landing in that layer is NOT itself proof the specific
+  mechanism was confirmed. Read that variant's own DE NOVO/DOMINANT-INHERITED
+  layer block: if tagged "De novo", its "De novo criteria applied:" line
+  must name PS2 or PM6 (delta > +0); if tagged "Dominant-inherited", its
+  criteria-applied line must show PP1 applied (delta > +0). If the block
+  instead says "None — de novo status not confirmed/not assessable" (or the
+  dominant-layer equivalent) with delta +0, the tag is WRONG — replace it
+  with "AD candidate, de novo unconfirmed" (or "... unassessed" if Parental
+  data: none) / "AD candidate, cosegregation unconfirmed", and fix any prose
+  elsewhere in the draft (including section 5's summary sentence) that
+  asserts de novo/inherited status as confirmed for that variant.
 - Two (or more) variants in the SAME gene, both with supporting evidence and
   segregation consistent with biallelic inheritance (compound heterozygous),
   that the draft frames as competing with each other (e.g. one "superior" or
@@ -62,6 +135,16 @@ Specifically check for:
   section 2 to list all such variants as co-causative, each preceded by its
   gene name, per a compound-het/biallelic recessive model — do not keep a
   single-winner framing for a gene with two qualifying trans variants.
+- DE NOVO + X-LINKED SAME-GENE CHECK: if both a DE NOVO layer block and an
+  X-LINKED layer block exist for the same gene/variant, they are not
+  competing diagnoses — a confirmed de novo occurrence (PS2) is independent,
+  stronger evidence of dominant mechanism than X-linked cosegregation (PP1,
+  which requires an affected mother and is irrelevant once de novo is already
+  confirmed). If the draft cites the X-LINKED layer's (lower) score/
+  classification for this variant instead of the DE NOVO layer's, correct it
+  to use the DE NOVO layer's total score and classification, and do not
+  present the X-linked layer's lower classification as a separate or
+  competing finding.
 - TRANS STATUS CHECK (recessive genes only, MANDATORY — do this for every
   gene the draft calls "compound heterozygous" or "biallelic" as a PAIR of
   two distinct variants; do NOT run this for a gene whose RECESSIVE block is
@@ -95,6 +178,27 @@ Specifically check for:
   has insufficient biallelic evidence, per the per-variant conclusions. Also
   fix section 3's summary sentence to match (remove "compound heterozygous"
   wording for that gene).
+- CAUSATIVE-THRESHOLD OMISSION CHECK (mandatory, do this for EVERY MOI layer
+  block above regardless of layer type — De Novo, Dominant-Inherited,
+  Recessive, X-Linked, Unclassified): the rule is a single uniform numeric
+  cutoff — any variant whose own layer/base block states a total ACMG point
+  value >= 6 (Likely Pathogenic or Pathogenic, Tavtigian et al. 2020) MUST
+  appear in section 2. Scan every layer block's own total-points line and
+  compare against section 2's variant list. A real past failure: a RECESSIVE
+  layer variant scored 9.5 points (Likely Pathogenic, e.g. via a reduced-
+  weight PM3 for unconfirmed segregation) and was left out of section 2
+  entirely — reasoning-only mention doesn't count — because a DIFFERENT
+  gene's variant scored higher (e.g. 11 points, Pathogenic) and the draft
+  treated that as a single winner. Scoring higher than another qualifying
+  variant is NEVER a valid reason to omit one that independently clears the
+  >=6 bar — both are independently causative unless one is excluded by one of
+  the OTHER named checks in this list (TRANS/CIS collapse, SINGLE-HIT
+  RECESSIVE CHECK, a stated factual inconsistency in its own block). If you
+  find a >=6-point variant missing from section 2, ADD its full write-up
+  (prose paragraph, criteria list copied verbatim from its own block, ACMG
+  classification line) — do not just name it in passing. Also fix section 5's
+  summary sentence to name every causative gene, not only the previously-sole
+  one.
 - SINGLE-HIT RECESSIVE CHECK (mandatory, do this for every gene the draft
   lists as causative with only ONE variant, even if everything else about
   the draft looks correct): find that gene's inheritance mode and this
@@ -134,20 +238,27 @@ Specifically check for:
   phenotype includes a feature that is itself a recognized hallmark of this
   specific disease, not a generic symptom shared by hundreds of syndromes
   ("intellectual disability", "developmental delay", "seizures", "short
-  stature" in isolation never qualify). A real past failure: the patient's
-  ENTIRE submitted phenotype was the single generic term "intellectual
-  disability" — nothing else — yet PP4 was applied with the reasoning "a core
-  feature of the [GENE]-associated syndromic neurodevelopmental disorder".
-  That reasoning is circular (every candidate gene in a multi-gene panel run
-  shares that same generic phenotype) and fails condition (2) by construction
-  — a bare generic diagnosis label is not a distinguishing feature, no matter
-  how strong the gene-disease literature link otherwise looks. If the
-  submitted phenotype is only a generic term like this with nothing further,
-  remove PP4 from every variant's criteria list in section 2 and 4, recompute
-  that variant's point total and classification accordingly (a variant may
-  drop out of "causative" entirely if PP4 was the deciding point), and update
-  the summary sentence to match. Do this for EVERY variant with PP4, not just
-  the first one you check.
+  stature" in isolation never qualify). A real past failure: the submitted
+  phenotype was the single generic term "intellectual disability" and PP4 was
+  applied with the reasoning "a core feature of the [GENE]-associated
+  syndromic neurodevelopmental disorder" — circular (every candidate gene in
+  a multi-gene panel run shares that same generic phenotype). A second,
+  near-identical recurrence: the submitted phenotype was "intellectual
+  disability. father and mother unaffected" and PP4 was applied again with
+  the same reasoning — segregation/pedigree facts (parents affected/
+  unaffected, family history of the SAME condition, consanguinity) are NOT
+  clinical features and do NOT satisfy condition (2); they bear on
+  inheritance model, not on what disease this patient has. Strip any
+  segregation/pedigree wording from the submitted phenotype before judging
+  this check — if what remains is only a generic disease-category term (alone
+  or combined with other generic terms) with no actual distinguishing
+  clinical finding, condition (2) fails by construction, no matter how strong
+  the gene-disease literature link otherwise looks. If so, remove PP4 from
+  every variant's criteria list in section 2 and 4, recompute that variant's
+  point total and classification accordingly (a variant may drop out of
+  "causative" entirely if PP4 was the deciding point), and update the summary
+  sentence to match. Do this for EVERY variant with PP4, not just the first
+  one you check.
 - BENIGN/OUT-OF-SCOPE MENTION CHECK (mandatory, scan the ENTIRE # Clinical
   Conclusion section): the only variants permitted anywhere in that section
   are causative variants (section 2), ACMG SF actionable findings from the

@@ -40,8 +40,27 @@ factual inconsistency in that block and note it explicitly rather than
 silently trusting either value — do not synthesize a compound heterozygous
 finding from it in that case.
 
+CAUSATIVE THRESHOLD RULE (mandatory, applies uniformly to EVERY MOI layer —
+De Novo, Dominant-Inherited, Recessive, X-Linked, Unclassified — no layer gets
+a different bar): a variant is CAUSATIVE, and MUST be listed in section 2, if
+its own layer/base block's total ACMG point value is >= 6 (Tavtigian et al.
+2020: 6-9 = Likely Pathogenic, >=10 = Pathogenic). This is a per-variant
+threshold check, not a competition — every qualifying variant across every
+layer goes in section 2, even if several different variants/genes each clear
+the bar and even if one of them scores higher than the others. Do NOT pick
+only the single highest-scoring variant and drop the rest to reasoning-only
+mention or omit them entirely once they clear >=6 points. The only reasons a
+>=6-point variant may be excluded from section 2 are the ones already listed
+elsewhere in these rules (TRANS STATUS / CIS collapse, SINGLE-HIT RECESSIVE
+CHECK, a stated factual inconsistency in its own block) — never "a stronger
+finding already explains the phenotype" or "already covered by another gene"
+as a reason alone to drop a second independently-qualifying variant. A
+variant scoring 0-5 points (VUS or below) is never causative regardless of
+layer, and falls to section 4 (if 4-5 points) or is omitted per the SCOPE RULE
+below.
+
 STEP 2 — For each layer's findings, list the variant(s)/layer(s) that
-together explain the phenotype:
+together explain the phenotype, applying the CAUSATIVE THRESHOLD RULE above:
 - A RECESSIVE layer block already covers BOTH its variants jointly (they are
   presented as co-causative in that block, not competing) — do not re-rank
   them here or pick one over the other.
@@ -50,6 +69,17 @@ together explain the phenotype:
   and RECESSIVE), decide from the evidence in each block which mechanism the
   data actually supports for this case — state your reasoning, do not
   silently drop one.
+- SPECIAL CASE — DE NOVO + X-LINKED on the same gene/variant: these are NOT
+  competing alternative diagnoses. A confirmed de novo occurrence (PS2, from
+  trio testing) is independent, stronger evidence of dominant mechanism than
+  X-linked cosegregation (PP1, which requires an affected mother transmitting
+  the variant — irrelevant once de novo is already confirmed). When a DE NOVO
+  layer block and an X-LINKED layer block both exist for the same gene/variant,
+  use the DE NOVO layer's total score and classification as the one that
+  explains the phenotype, note in your reasoning that the X-linked layer's
+  lower score simply reflects PP1 not being met (not a weaker or conflicting
+  diagnosis), and do not present the X-linked layer's lower classification as
+  a separate, competing finding.
 
 SINGLE-HIT RECESSIVE CHECK (defense-in-depth): if any UNCLASSIFIED block (or
 any layer block outside RECESSIVE) describes a heterozygous variant in a
@@ -83,15 +113,46 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
 
 1) Summary of clinical phenotype: [1-2 sentences summarizing the patient's phenotype as given]
 
-2) Causative variant(s): list every variant identified as causative above,
-   grouped by MOI layer if more than one layer contributed findings. If a
-   RECESSIVE block's two variants are both causative, list each on its own,
+2) Causative variant(s): list EVERY variant meeting the CAUSATIVE THRESHOLD
+   RULE above (own layer/base block total ACMG points >= 6, i.e. Likely
+   Pathogenic or Pathogenic) — grouped by MOI layer if more than one layer
+   contributed findings. This is not limited to one "primary" finding: if two,
+   three, or more variants in different genes/layers each independently clear
+   the >=6-point bar, ALL of them go here, each with its own full write-up. If
+   a RECESSIVE block's two variants are both causative, list each on its own,
    ALWAYS preceded by its gene name, and do not present them as competing
    with each other. If findings come from more than one layer for different
    genes, present each layer's finding as its own independent diagnosis
-   unless the evidence clearly says otherwise.
+   unless the evidence clearly says otherwise — a higher-scoring finding
+   elsewhere is NOT grounds to omit another qualifying finding.
 
-   [GENE] ([HGVS]) — [MOI layer this finding came from, e.g. "De novo", "Dominant-inherited", "Recessive (compound heterozygous)", "X-linked"]
+   VARIANT IDENTITY CHECK (mandatory, before writing the line below): [GENE]
+   and [HGVS] must be copied CHARACTER-FOR-CHARACTER from that variant's own
+   layer/base block header line above (e.g. its "# Variant N — GENE (HGVS)"
+   line). Never retype, reconstruct, abbreviate, or paraphrase the HGVS from
+   memory — copy the exact substring. A real past failure to not repeat: the
+   source block's own header read "c.1524G>A:p.W508X" (nonsense/stop-gain,
+   confirmed by AutoPVS1/ClinGen elsewhere in the same block) and the draft
+   instead wrote "c.1524G>A; p.Glu508Lys" — a fabricated missense change that
+   directly contradicts the same paragraph's own PVS1/NMD reasoning one
+   sentence later. Any mismatch between the amino acid change you are about
+   to write and the source block's own HGVS string, however small, is this
+   exact failure — stop and copy the source string exactly instead.
+
+   [GENE] ([HGVS]) — [MOI layer tag — this names which layer PROCESSED the
+   finding, not a confirmed inheritance claim. A variant lands in the DE NOVO
+   LAYER simply because its gene is AD/AD_AR/XLD, regardless of whether any
+   parent was ever tested — check that layer block's own "De novo criteria
+   applied:" line before tagging: only write "De novo" here if that line
+   names PS2 or PM6 (i.e. the layer's delta was > +0). If the block instead
+   says "None — de novo status not confirmed/not assessable" (delta +0), do
+   NOT write "De novo" as the tag — write "AD candidate, de novo unconfirmed"
+   (or "AD candidate, de novo status unassessed" if Parental data: none)
+   instead. Same rule for "Dominant-inherited" — only use that tag if the
+   Dominant-Inherited layer block actually applied PP1 (delta > +0);
+   otherwise write "AD candidate, cosegregation unconfirmed". A layer
+   producing a block for a gene is not the same as that layer's specific
+   criterion having been met — the tag must reflect the latter.]
 
    Naming the disease/condition this gene causes: use ONLY the disease name
    stated in THIS gene's own layer block — never borrow or generalize a
@@ -151,7 +212,7 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    invent a different point value for a listed criterion:
      PVS1=+8 (VeryStrong) | PS1/PS2/PS3/PS4=+4 (Strong) |
      PM1/PM2/PM3/PM5/PM6=+2 (Moderate) | PP1/PP3/PP4=+1 (Supporting) |
-     BA1=-8 (Standalone) | BS1/BS4=-4 (Strong) | BP1/BP7=-1 (Supporting)
+     BA1=-8 (Standalone) | BS1/BS2/BS4=-4 (Strong) | BP1/BP7=-1 (Supporting)
    PM3 ("in-trans with a pathogenic variant") may ONLY appear if this
    variant's finding came from a RECESSIVE layer block — it is invalid for
    any De Novo, Dominant-Inherited, X-Linked, or Unclassified finding; if you
@@ -188,11 +249,16 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    identified."
 
 5) Summary: [one sentence tying together the gene(s), the MOI layer(s)
-   involved, and ACMG classification(s) into a final overall finding — e.g.
-   "These findings support a diagnosis of [condition] due to a de novo
-   pathogenic variant in [GENE]" or, if multiple layers contributed, name
-   each. Ground it only in what sections 1-2 already state, no new evidence.
-   Do not summarize sections 3-4 here — they stand on their own.]
+   involved, and ACMG classification(s) into a final overall finding — use
+   whatever tag section 2 actually assigned that variant (e.g. "These
+   findings support a diagnosis of [condition] due to a de novo pathogenic
+   variant in [GENE]" ONLY if section 2 tagged it "De novo"; if section 2
+   tagged it "AD candidate, de novo unconfirmed/unassessed" instead, say "...
+   due to a pathogenic variant in [GENE] (de novo status unconfirmed)" — do
+   not upgrade an unconfirmed tag to a confirmed "de novo" claim here), or,
+   if multiple layers contributed, name each. Ground it only in what
+   sections 1-2 already state, no new evidence. Do not summarize sections
+   3-4 here — they stand on their own.]
 
 CITATIONS ARE MANDATORY, NOT OPTIONAL: every layer block above already
 contains inline (PMID:XXXXXXXX) and URL citations for its claims — when you

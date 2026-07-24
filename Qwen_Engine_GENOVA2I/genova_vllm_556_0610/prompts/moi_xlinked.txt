@@ -6,7 +6,7 @@ distinguishes X-linked recessive (XLR) from X-linked dominant (XLD)
 presentation and adds a cosegregation criterion where confirmed. Do NOT
 re-evaluate or re-score anything already covered in the BASE CONCLUSION below
 (molecular mechanism, frequency, in-silico evidence, PVS1/PM1/PM2/PM5/PP3/PP4/
-BA1/BS1/BS4/BP1/BP7). There is no new ACMG criterion code specific to
+BA1/BS1/BS2/BS4/BP1/BP7). There is no new ACMG criterion code specific to
 X-linked inheritance — this layer reuses the standard criteria (chiefly PP1)
 through a sex-linked-segregation lens.
 
