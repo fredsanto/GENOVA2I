@@ -282,6 +282,28 @@ def _ctx_info(variant_context: str) -> tuple[int, str]:
 
 
 async def _run_direct(job_id: str, csv_bytes: bytes, filename: str, phenotype: str):
+    """
+    Thin wrapper around _run_direct_impl — this is scheduled via a fire-and-forget
+    asyncio.create_task() (see /analyze) with nothing ever awaiting the result, so
+    any exception that escapes _run_direct_impl uncaught previously killed the task
+    silently: asyncio logs one generic "Task exception was never retrieved" line
+    (no job_id, easy to miss) and the job's SSE event list just stops growing
+    forever — the client hangs until the 1h stale-job sweep evicts it and reads
+    back as "Job not found", with no real diagnostic trail. A real observed case:
+    an unmapped "Variant" CSV field reaching detect_genome_build() as a bare float
+    NaN raised AttributeError deep in a helper, well before the try/except that
+    already wraps the pipeline run itself. This wrapper is the last line of
+    defense — it must never let anything past it silently.
+    """
+    try:
+        await _run_direct_impl(job_id, csv_bytes, filename, phenotype)
+    except Exception as e:
+        logger.exception("Unhandled exception in _run_direct (job_id=%s)", job_id)
+        await _push_event(job_id, {"type": "error", "message": f"Internal error: {e}"})
+        await _finish_job(job_id)
+
+
+async def _run_direct_impl(job_id: str, csv_bytes: bytes, filename: str, phenotype: str):
     """Import and run the pipeline directly, streaming per-variant stage progress."""
     global _active_job_id
     _job_logs[job_id] = []

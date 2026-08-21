@@ -56,6 +56,28 @@ INCLUDE requires evidence for BOTH:
      treat as weak evidence, not strong, OR
    - Variant is homozygous, or compound heterozygous with a second variant in the
      same gene, in a known recessive gene with low population frequency, OR
+     the variant is a loss-of-function type (frameshift, nonsense, canonical
+     splice) — a homozygous LoF variant in a phenotype-matched gene is a STRONG
+     signal on its own. The input data's own stated Zygosity field (e.g.
+     "hom") is authoritative for this check — do NOT require ALLELIC BALANCE
+     data to confirm it before counting it. Missing/NA allelic balance means
+     the zygosity call is simply unconfirmed by that one additional source, not
+     that it is wrong or untrustworthy; it is a caveat to mention, never a
+     reason by itself to discount a stated homozygous call or exclude the
+     variant. GNOMAD GENE CONSTRAINT (pLI/LOEUF) is NEVER grounds to discount
+     this signal either: pLI/LOEUF measure selection against a HETEROZYGOUS
+     single LoF allele in the general population — that is only informative
+     about a DOMINANT/haploinsufficiency reading (a single LoF hit sufficient
+     to cause disease on its own). It says NOTHING about biallelic pathogenicity.
+     A low pLI / high LOEUF ("LoF-tolerant") is EXPECTED and NORMAL for a true
+     recessive gene — population carriers of one LoF allele are unaffected by
+     definition, so this metric is uninformative here, not contradictory
+     evidence. A real past failure: a homozygous frameshift in a gene the
+     evidence directly linked to the patient's phenotype, with 316 ClinVar P/LP
+     LoF entries for that gene, was EXCLUDEd for "gene is LoF-tolerant (low
+     pLI); homozygous LoF insufficient without strong functional proof" — this
+     is backwards and must never be repeated: do not cite pLI/LOEUF against a
+     homozygous or compound-het LoF call, OR
    - Confirmed or assumed DE NOVO (PS2/PM6 — AB data shows absent in both parents,
      or one parent untested) in a gene relevant to the phenotype is a STRONG
      pathogenicity signal, regardless of variant type (missense, LoF, etc.) — rank
@@ -111,6 +133,27 @@ EXCEPTION — Compound heterozygous candidates (autosomal recessive / AD-AR gene
      criteria for THIS variant (EXCLUDE unless a true second trans hit, homozygosity,
      or independent dominant-mechanism evidence exists).
 
+HARD GATE — READ ZYGOSITY BEFORE APPLYING THE "SINGLE HETEROZYGOUS VARIANT
+INSUFFICIENT" EXCLUDE RULE BELOW:
+   Check the variant's Zygosity value in VARIANT DATA above (this may be a
+   stated value from the input, e.g. "hom"/"Homozygous", or a value the
+   pipeline itself derived from allelic balance when no Zygosity column
+   existed, e.g. "Homozygous (derived from AB=0.95; ...)" — treat both the
+   same way; a derived call is still a zygosity call, not an absence of one).
+   - If Zygosity says HOMOZYGOUS (or hemizygous, for an X-linked gene in a
+     male) in any form: the "single heterozygous variant insufficient"
+     EXCLUDE rule below CANNOT be used — a homozygous/hemizygous genotype IS
+     the second hit; there is no "single variant, no second hit" scenario to
+     invoke. Do not write an exclude-case that mentions zygosity, a second
+     hit, or compound-het status for this variant. The ONLY valid grounds to
+     EXCLUDE a stated/derived-homozygous variant are gene-phenotype link or
+     pathogenicity evidence — never zygosity/second-hit reasoning.
+   - The single-heterozygous-variant EXCLUDE rule applies ONLY when Zygosity
+     is explicitly heterozygous (stated or derived) — never when Zygosity is
+     simply "NA"/absent. Missing zygosity is a data gap (note it as a
+     caveat), not proof of heterozygosity, and is not by itself grounds to
+     invoke this rule either.
+
 EXCLUDE if:
    - Gene-phenotype link is absent or only speculative (no literature, no OMIM
      association, no ClinVar disease entries for this phenotype), OR
@@ -119,19 +162,34 @@ EXCLUDE if:
    - Single heterozygous variant (any consequence) in a gene whose ONLY reported
      mode is AUTOSOMAL RECESSIVE (or XLR) — no dominant mechanism reported at
      all — with no second hit and no compound-het evidence: insufficient for
-     disease causation under a purely recessive model. Do NOT apply this to a
-     gene reported as AD_AR, XLD_XLR, or otherwise dual/uncertain-mode — for
-     those, the heterozygous variant may still be sufficient under the AD
-     reading alone (see INHERITED FROM AN AFFECTED PARENT above), so evaluate
-     it as a potential dominant finding rather than excluding it on recessive
-     grounds just because the gene has also been reported as AR somewhere, OR
+     disease causation under a purely recessive model. Per the HARD GATE above,
+     this rule requires Zygosity to say heterozygous (stated or derived) — it
+     can NEVER be applied when Zygosity says homozygous/hemizygous. Do NOT
+     apply this to a gene reported as AD_AR, XLD_XLR, or otherwise
+     dual/uncertain-mode — for those, the heterozygous variant may still be
+     sufficient under the AD reading alone (see INHERITED FROM AN AFFECTED
+     PARENT above), so evaluate it as a potential dominant finding rather than
+     excluding it on recessive grounds just because the gene has also been
+     reported as AR somewhere, OR
    - Proband allelic balance ≤ 0.2 with no other strong independent evidence
      (ClinVar Pathogenic/Likely pathogenic, confirmed second hit) — treat as an
-     unconfirmed/low-confidence call, not sufficient grounds for INCLUDE.
+     unconfirmed/low-confidence call, not sufficient grounds for INCLUDE. This
+     does not apply when Zygosity itself already says homozygous — a low or
+     absent allelic-balance READING alongside a HOMOZYGOUS zygosity CALL is a
+     data-quality caveat about the AB measurement, not a contradiction of the
+     zygosity call; do not let it override a stated/derived homozygous call.
 
-Important: missing tool results (failed retrieval, no rsID, no LitVar hits) do NOT
-by themselves justify EXCLUDE. Evaluate the variant-level signals that ARE present
-(frequency, CADD, zygosity, gene-disease association) before deciding.
+Important: missing tool results (failed retrieval, no rsID, no LitVar hits, no
+allelic balance data, no gnomAD frequency value) do NOT by themselves justify
+EXCLUDE. A real past failure: a stated-homozygous LoF frameshift in a gene the
+evidence directly links to the patient's phenotype was EXCLUDEd for "zygosity
+unverified without allelic balance; no population frequency data" — missing
+confirmatory data is not the same as negative or conflicting data, and is never
+sufficient grounds for EXCLUDE on its own when the variant-level signals that
+ARE present (stated zygosity, CADD, gene-disease association, variant type)
+otherwise support pathogenicity. Evaluate what IS present before deciding; note
+what's missing as a caveat in the Include-case/Exclude-case text, not as the
+deciding factor.
 
 Output exactly three lines and nothing else:
 Include-case: <strongest reason to include, ≤15 words>

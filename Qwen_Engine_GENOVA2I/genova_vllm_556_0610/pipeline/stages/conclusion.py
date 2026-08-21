@@ -28,6 +28,7 @@ from pipeline.core.acmg_pp2_bp1 import validate_pp2_bp1
 from pipeline.core.acmg_ps1_pm5 import validate_ps1_pm5
 from pipeline.core.acmg_bp6 import validate_bp6
 from pipeline.core.acmg_pp4 import validate_pp4
+from pipeline.core.acmg_points import relabel_all_points_lines
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -99,4 +100,13 @@ def run_one(
     result = validate_pp2_bp1(result, variant_context)
     result = validate_ps1_pm5(result, variant_context)
     result = validate_bp6(result)
-    return validate_pp4(result)
+    result = validate_pp4(result)
+    # Unconditional final pass: the validators above only re-derive the
+    # classification label (via adjust_points_line -> classify()) when they
+    # actively strip a criterion. If none fire, the SLM's own raw "ACMG
+    # points: N -> Label" line is never independently checked — a real
+    # observed failure had the SLM write "4.5 -> Likely Pathogenic" for a
+    # variant whose points value is in the 0-5 VUS band, not 6-9. Re-derive
+    # every points line's label from its own stated N unconditionally so this
+    # can't slip through undetected.
+    return relabel_all_points_lines(result)

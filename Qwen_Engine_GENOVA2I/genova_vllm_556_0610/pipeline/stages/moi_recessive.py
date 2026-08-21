@@ -25,11 +25,13 @@ Public API:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference, append_clinvar_references
+from pipeline.core.acmg_points import relabel_all_points_lines
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -41,6 +43,74 @@ _SOLO_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "moi_reces
 
 MAX_NEW_TOKENS_RECESSIVE = 900
 MAX_NEW_TOKENS_RECESSIVE_SOLO = 600
+
+# A compound-het pair is only a confirmed P/LP biallelic diagnosis if BOTH
+# variants independently clear the Likely Pathogenic threshold — one strong
+# variant does not rescue a weak/VUS partner (the partner's own base score
+# already reflects that it does not, on its own, explain a recessive disease).
+# Computed deterministically here (not left to the LLM) because the SLM
+# repeatedly let a single >=6 partner carry the whole pair as "causative"
+# during final synthesis, ignoring the weak partner entirely.
+_CAUSATIVE_THRESHOLD = 6.0
+
+_TOTAL_POINTS_RE = re.compile(
+    r"\*\*Total ACMG points:\*\*\s*([-+]?\d+(?:\.\d+)?)\s*→"
+)
+
+
+def _joint_compound_het_status(pair_block: str) -> str | None:
+    """
+    Parse both variants' own "**Total ACMG points:** N →" lines (in Variant A,
+    Variant B order, per the fixed template below) and deterministically decide
+    whether this pair is a confirmed compound-het P/LP diagnosis or a compound
+    VUS. Returns None (no-op) if the expected two totals can't be found, so a
+    malformed LLM response degrades gracefully instead of raising.
+    """
+    matches = _TOTAL_POINTS_RE.findall(pair_block)
+    if len(matches) < 2:
+        logger.warning(
+            "[MOIRecessive] Could not find two 'Total ACMG points' lines in pair "
+            "block — skipping joint compound-het classification."
+        )
+        return None
+    try:
+        points_a, points_b = float(matches[0]), float(matches[1])
+    except ValueError:
+        return None
+
+    if points_a >= _CAUSATIVE_THRESHOLD and points_b >= _CAUSATIVE_THRESHOLD:
+        return (
+            f"CAUSATIVE — compound heterozygous Pathogenic/Likely Pathogenic. "
+            f"Both alleles independently reach the Likely Pathogenic threshold "
+            f"(Variant A: {points_a:g} pts, Variant B: {points_b:g} pts; both >= "
+            f"{_CAUSATIVE_THRESHOLD:g})."
+        )
+    return (
+        f"COMPOUND VUS — NOT a confirmed causative biallelic diagnosis. "
+        f"At least one allele is below the Likely Pathogenic threshold "
+        f"(Variant A: {points_a:g} pts, Variant B: {points_b:g} pts; both must "
+        f"independently reach >= {_CAUSATIVE_THRESHOLD:g}). Report this gene as "
+        f"compound VUS, not as Pathogenic/Likely Pathogenic, even though one "
+        f"partner individually clears the threshold — a single strong allele "
+        f"does not establish a biallelic recessive diagnosis on its own."
+    )
+
+
+def _inject_joint_status(pair_block: str, joint_status: str | None) -> str:
+    if joint_status is None:
+        return pair_block
+    marker = "\n## Variant A"
+    if marker not in pair_block:
+        logger.warning(
+            "[MOIRecessive] '## Variant A' marker not found — could not inject "
+            "joint compound-het classification line."
+        )
+        return pair_block
+    return pair_block.replace(
+        marker,
+        f"\n**Joint compound-het classification:** {joint_status}\n{marker}",
+        1,
+    )
 
 _PHASE_LABELS = {
     "trans":   "TRANS confirmed (different parents) — compound heterozygous model applies.",
@@ -147,8 +217,12 @@ def run_pair(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_RECESSIVE,
     )
+    result = relabel_all_points_lines(result)
     full_context = variant_a_context + "\n" + variant_b_context + "\n" + variant_a_base_conclusion + "\n" + variant_b_base_conclusion
     result = validate_citations(result, full_context)
+    joint_status = _joint_compound_het_status(result)
+    logger.info("[MOIRecessive] Joint compound-het status for %s: %s", gene, joint_status)
+    result = _inject_joint_status(result, joint_status)
     return append_clinvar_references(result, [
         (variant_a_label, variant_a_context + "\n" + variant_a_base_conclusion),
         (variant_b_label, variant_b_context + "\n" + variant_b_base_conclusion),
@@ -207,6 +281,7 @@ def run_solo(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_RECESSIVE_SOLO,
     )
+    result = relabel_all_points_lines(result)
     full_context = variant_context + "\n" + variant_base_conclusion
     result = validate_citations(result, full_context)
     return append_clinvar_reference(result, full_context)

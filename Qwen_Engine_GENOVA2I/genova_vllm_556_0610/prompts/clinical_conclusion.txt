@@ -52,18 +52,37 @@ only the single highest-scoring variant and drop the rest to reasoning-only
 mention or omit them entirely once they clear >=6 points. The only reasons a
 >=6-point variant may be excluded from section 2 are the ones already listed
 elsewhere in these rules (TRANS STATUS / CIS collapse, SINGLE-HIT RECESSIVE
-CHECK, a stated factual inconsistency in its own block) — never "a stronger
-finding already explains the phenotype" or "already covered by another gene"
-as a reason alone to drop a second independently-qualifying variant. A
-variant scoring 0-5 points (VUS or below) is never causative regardless of
-layer, and falls to section 4 (if 4-5 points) or is omitted per the SCOPE RULE
-below.
+CHECK, COMPOUND-HET JOINT THRESHOLD EXCEPTION below, a stated factual
+inconsistency in its own block) — never "a stronger finding already explains
+the phenotype" or "already covered by another gene" as a reason alone to drop
+a second independently-qualifying variant. A variant scoring below 6 points
+(VUS or below) is never causative regardless of layer, and falls to section 4
+(if its total is >= 4 and < 6) or is omitted per the SCOPE RULE below.
+
+COMPOUND-HET JOINT THRESHOLD EXCEPTION (mandatory, applies only to a
+RECESSIVE layer block of the "(compound heterozygous / biallelic)" PAIR kind
+— never to a "(confirmed homozygous, biallelic)" single-variant block, which
+is unaffected by this rule): a compound-het pair is causative as a PAIR, not
+as two independent single-variant threshold checks. The block already states
+its own backend-computed "**Joint compound-het classification:**" line —
+copy that verdict verbatim rather than re-deriving it. If it says CAUSATIVE,
+list both variants in section 2 as co-causative per STEP 2 below. If it says
+COMPOUND VUS, do NOT list either variant in section 2 as Pathogenic/Likely
+Pathogenic — even though one partner's own individual total may be >= 6 —
+because a single strong allele in a recessive gene does not by itself
+establish a biallelic diagnosis; the weak/VUS partner means the second hit
+required for a recessive mechanism is not confirmed. In that case, mention
+the pair only under section 4 (Notable VUS) if either variant's own total is
+>= 4 and < 6 points, per the normal VUS rule.
 
 STEP 2 — For each layer's findings, list the variant(s)/layer(s) that
 together explain the phenotype, applying the CAUSATIVE THRESHOLD RULE above:
-- A RECESSIVE layer block already covers BOTH its variants jointly (they are
-  presented as co-causative in that block, not competing) — do not re-rank
-  them here or pick one over the other.
+- A RECESSIVE layer block of the "(compound heterozygous / biallelic)" PAIR
+  kind covers BOTH its variants jointly (they are presented as co-causative,
+  not competing) ONLY when its own "**Joint compound-het classification:**"
+  line says CAUSATIVE — per the COMPOUND-HET JOINT THRESHOLD EXCEPTION above.
+  Do not re-rank the two variants against each other, but also do not treat
+  the pair as causative when that line says COMPOUND VUS.
 - A DE NOVO or DOMINANT-INHERITED or X-LINKED layer block covers ONE variant.
 - If the same gene appears in more than one layer (e.g. DOMINANT-INHERITED
   and RECESSIVE), decide from the evidence in each block which mechanism the
@@ -93,10 +112,13 @@ SCOPE RULE (mandatory — applies to the entire # Clinical Conclusion section
 below): the ONLY variants that may be named anywhere in this section are:
   (a) causative variant(s) — section 2;
   (b) ACMG SF actionable finding(s) from the ground-truth list above — section 3;
-  (c) VUS variant(s) whose OWN layer/base block states exactly 4 or 5 total
-      ACMG points — section 4.
+  (c) VUS variant(s) whose OWN layer/base block states a total ACMG point
+      value that is >= 4 AND < 6 (i.e. 4, 4.5, 5, or 5.5 — half-point totals
+      are expected from a reduced-weight PM3 delta and count as in range;
+      6 itself is Likely Pathogenic, not VUS, and belongs in section 2
+      instead) — section 4.
 A variant classified Benign or Likely Benign — or a VUS with a point total
-outside 4-5 — must NEVER be named, listed, described, or even referenced as
+outside [4, 6) — must NEVER be named, listed, described, or even referenced as
 "excluded"/"not causative" anywhere in this section. Do not mention that such
 a variant exists, was considered, or was ruled out. Simply omit it entirely,
 as if it were never in the input. This rule overrides any instinct to be
@@ -138,6 +160,26 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    sentence later. Any mismatch between the amino acid change you are about
    to write and the source block's own HGVS string, however small, is this
    exact failure — stop and copy the source string exactly instead.
+
+   EXCEPTION — RECESSIVE block of the "(confirmed homozygous, biallelic)"
+   kind: unlike every other block type, this one's header line intentionally
+   has NO HGVS at all ("# Recessive Analysis — GENE (confirmed homozygous,
+   biallelic)" — gene name only). This is expected, by design, not a data
+   error or an omission to investigate. For this block kind only, take the
+   HGVS from its own "**Comment:**" prose instead (e.g. "...homozygous for
+   the *GENE* c.XXXX variant...") — copy it character-for-character from
+   there. Do NOT treat the header's missing HGVS as a discrepancy, do NOT go
+   searching other blocks/layers for "the missing HGVS," and do NOT conclude
+   the block's gene/variant identity is corrupted or mismatched with another
+   gene's block just because this one header lacks what every other header
+   has — that absence is normal for this specific block kind and nothing
+   else. A real past failure to not repeat: the model treated this expected
+   header format as a "critical discrepancy," searched a neighboring
+   unrelated gene's block for an HGVS to explain it, hallucinated that the
+   two blocks' data had been swapped, and spent its entire output budget
+   re-deriving this same false alarm in a loop instead of ever writing
+   section 2 — if the header has no HGVS and the block is this kind, that is
+   normal; get the HGVS from the Comment and move on immediately.
 
    [GENE] ([HGVS]) — [MOI layer tag — this names which layer PROCESSED the
    finding, not a confirmed inheritance claim. A variant lands in the DE NOVO
@@ -239,10 +281,12 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    — a brief cross-reference is enough (e.g. "See Section 2 above."). If the
    ground-truth list says "None", write exactly: "None identified."
 
-4) Notable VUS (ACMG 4-5 points): scan every layer/base block above (not
-   just the ones already used in sections 2-3) for any variant whose OWN
-   block states a total ACMG point value of exactly 4 or 5 AND a
-   classification of "Uncertain significance" / "VUS". List each as [GENE]
+4) Notable VUS (ACMG >= 4 and < 6 points): scan every layer/base block above
+   (not just the ones already used in sections 2-3) for any variant whose OWN
+   block states a total ACMG point value that is >= 4 AND < 6 (4, 4.5, 5, or
+   5.5 — a half-point total from a reduced-weight PM3 delta still counts; 6
+   itself is Likely Pathogenic and belongs in section 2, not here)
+   AND a classification of "Uncertain significance" / "VUS". List each as [GENE]
    ([HGVS]) — [N] pts, with a one-sentence justification copied from that
    variant's own criteria list. Do not include a variant already listed in
    section 2 as causative. If no such variant exists, write exactly: "None

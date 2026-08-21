@@ -296,6 +296,34 @@ def _parse_polyphen2_value(raw: str) -> str:
     return worst_token
 
 
+# Allelic-balance thresholds for deriving zygosity when no Zygosity value is
+# available for a row. AB >= 0.85 reads as homozygous (the reference allele is
+# essentially absent from reads); AB < 0.20 is too low to call het confidently
+# (mosaic/subclonal/technical-noise territory) so it's flagged rather than
+# stated plainly. These are conservative, clinically-conventional cutoffs, not
+# an ACMG rule — the report always labels the value "derived", never "stated".
+_ZYG_HOM_AB_THRESHOLD = 0.85
+_ZYG_HET_AB_MIN = 0.20
+
+
+def _derive_zygosity_from_ab(ab_raw: str) -> str:
+    """Best-effort zygosity call from Allelic_balance (VAF) for a single row,
+    used only when that row's own Zygosity value is "NA" — a stated Zygosity
+    value (from a real Zygosity/Genotype/Zyg column in the upload) is always
+    trusted as-is and never overridden by this. Returns "NA" if ab_raw isn't a
+    parseable float, so the row is no worse off than before.
+    """
+    try:
+        ab = float(ab_raw)
+    except (TypeError, ValueError):
+        return "NA"
+    if ab >= _ZYG_HOM_AB_THRESHOLD:
+        return f"Homozygous (derived from AB={ab:.2f}; input had no Zygosity column)"
+    if ab >= _ZYG_HET_AB_MIN:
+        return f"Heterozygous (derived from AB={ab:.2f}; input had no Zygosity column)"
+    return f"Heterozygous (derived from AB={ab:.2f}, low — verify; input had no Zygosity column)"
+
+
 def _parse_aachange(raw: str) -> str:
     """Extract a display HGVS string from ANNOVAR AAChange annotation."""
     if not raw or raw in ("NA", ".", "", "nan"):
@@ -627,7 +655,15 @@ def _build_normalized_df(df: pd.DataFrame, df_original: pd.DataFrame) -> pd.Data
       - If HGVS is all NA but AAChange exists in the original input, fill from AAChange.
       - Normalise Type values through the ANNOVAR vocabulary map.
     """
-    out = pd.DataFrame()
+    # index=df.index (not a bare pd.DataFrame()) so a scalar "NA" assigned to
+    # an unmapped column (e.g. "Variant", first in TARGET_COLUMNS and usually
+    # unmapped) broadcasts across the real row index immediately. Without it,
+    # the scalar assignment on a still-empty frame produces no rows, and once
+    # a later column assigns a real Series and establishes the index, pandas
+    # backfills that earlier column with NaN instead of "NA" — a real observed
+    # failure where a bare float NaN (not the string "NA") reached a downstream
+    # `.strip()` call and crashed with AttributeError.
+    out = pd.DataFrame(index=df.index)
     for col in TARGET_COLUMNS:
         if col in df.columns:
             out[col] = df[col].apply(_clean)
@@ -649,6 +685,16 @@ def _build_normalized_df(df: pd.DataFrame, df_original: pd.DataFrame) -> pd.Data
     out["Type"] = out["Type"].apply(
         lambda v: _normalize_type(v) if v != "NA" else v
     )
+
+    # Derive Zygosity from Allelic_balance for any row that has no stated
+    # Zygosity value — whether because no source column mapped to Zygosity at
+    # all, or that specific row's cell was blank/NA while others had a real
+    # value. A real stated value is always left untouched.
+    if "Allelic_balance" in out.columns:
+        out["Zygosity"] = [
+            _derive_zygosity_from_ab(ab) if zyg == "NA" else zyg
+            for zyg, ab in zip(out["Zygosity"], out["Allelic_balance"])
+        ]
 
     # Collapse compound SpliceAI annotation strings (whatever the source
     # column was named) down to a single max delta score

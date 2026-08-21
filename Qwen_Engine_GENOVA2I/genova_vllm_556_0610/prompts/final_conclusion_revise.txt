@@ -193,12 +193,39 @@ Specifically check for:
   variant is NEVER a valid reason to omit one that independently clears the
   >=6 bar — both are independently causative unless one is excluded by one of
   the OTHER named checks in this list (TRANS/CIS collapse, SINGLE-HIT
-  RECESSIVE CHECK, a stated factual inconsistency in its own block). If you
-  find a >=6-point variant missing from section 2, ADD its full write-up
-  (prose paragraph, criteria list copied verbatim from its own block, ACMG
-  classification line) — do not just name it in passing. Also fix section 5's
-  summary sentence to name every causative gene, not only the previously-sole
-  one.
+  RECESSIVE CHECK, COMPOUND-HET JOINT THRESHOLD CHECK below, a stated factual
+  inconsistency in its own block). If you find a >=6-point variant missing
+  from section 2, ADD its full write-up (prose paragraph, criteria list
+  copied verbatim from its own block, ACMG classification line) — do not just
+  name it in passing. Also fix section 5's summary sentence to name every
+  causative gene, not only the previously-sole one.
+  EXCEPTION — this check does NOT apply on its own to a single variant inside
+  a RECESSIVE "(compound heterozygous / biallelic)" PAIR block; see COMPOUND-
+  HET JOINT THRESHOLD CHECK below, which overrides this check for that block
+  kind specifically.
+- COMPOUND-HET JOINT THRESHOLD CHECK (mandatory, do this for every RECESSIVE
+  layer block of the "(compound heterozygous / biallelic)" PAIR kind — never
+  for the "(confirmed homozygous, biallelic)" single-variant kind, which is
+  exempt): that block already states its own backend-computed "**Joint
+  compound-het classification:**" line — this is the authoritative,
+  already-verified verdict; do not recompute it from the two variants'
+  individual totals yourself. A real past failure: Variant B in a pair scored
+  11 points (Pathogenic) while Variant A scored only 1 point (VUS); the draft
+  listed the pair in section 2 as "Pathogenic" causative because Variant B
+  alone cleared >=6, ignoring that Variant A's weak score means the second
+  hit required for a biallelic recessive diagnosis is not established. Read
+  the block's "**Joint compound-het classification:**" line:
+    - If it says CAUSATIVE: both variants belong in section 2 as co-causative,
+      exactly as the CAUSATIVE-THRESHOLD OMISSION CHECK above would otherwise
+      require.
+    - If it says COMPOUND VUS: neither variant may be listed in section 2 as
+      Pathogenic/Likely Pathogenic, REGARDLESS of what either variant's own
+      individual "Total ACMG points" line says — the joint line already
+      accounts for and overrides those individual totals for causative-
+      listing purposes. If the draft lists either variant in section 2 anyway,
+      remove it from section 2 (move to section 4 if its own individual total
+      is >= 4 and < 6 points, per the normal VUS rule; otherwise omit per the
+      SCOPE RULE), and fix section 5's summary sentence to match.
 - SINGLE-HIT RECESSIVE CHECK (mandatory, do this for every gene the draft
   lists as causative with only ONE variant, even if everything else about
   the draft looks correct): find that gene's inheritance mode and this
@@ -262,12 +289,18 @@ Specifically check for:
 - BENIGN/OUT-OF-SCOPE MENTION CHECK (mandatory, scan the ENTIRE # Clinical
   Conclusion section): the only variants permitted anywhere in that section
   are causative variants (section 2), ACMG SF actionable findings from the
-  ground-truth list above (section 3), and VUS variants with exactly 4 or 5
-  total ACMG points per their own layer/base block (section 4). If the draft
-  names, describes, or even mentions-as-excluded any variant classified
-  Benign or Likely Benign, or any VUS outside the 4-5 point range, delete
-  that mention entirely (do not replace it with an explanation of why it was
-  removed — just remove it, as if it were never written).
+  ground-truth list above (section 3), and VUS variants whose total ACMG
+  points are >= 4 AND < 6 per their own layer/base block (section 4) — 4,
+  4.5, 5, and 5.5 all count as in-range (half-point totals from a
+  reduced-weight PM3 delta are expected, not a mismatch); 6 itself is Likely
+  Pathogenic and belongs in section 2. If the draft names, describes, or even
+  mentions-as-excluded any variant classified Benign or Likely Benign, or any
+  VUS strictly outside [4, 6), delete that mention entirely (do not replace it
+  with an explanation of why it was removed — just remove it, as if it were
+  never written). Conversely, if a variant scoring 4.5 or 5.5 was dropped from
+  section 4 and only survives as an unscoped mention elsewhere (e.g. section
+  5's summary sentence), that is the OPPOSITE error — move it into section 4
+  properly instead of deleting it.
 - ACTIONABLE SECTION CHECK (mandatory): every variant listed in section 3
   must appear in the ACMG SF ground-truth list above, with matching gene,
   condition, and classification. Remove any section-3 entry not in the
@@ -277,11 +310,14 @@ Specifically check for:
   "None" and section 3 lists variants anyway, replace section 3 with "None
   identified."
 - NOTABLE VUS CHECK (mandatory): every variant listed in section 4 must have
-  a layer/base block above stating a total ACMG point value of exactly 4 or
-  5 AND a classification of "Uncertain significance"/"VUS". Remove any
-  section-4 entry whose own block shows a different point total or a
-  different classification. If section 4 is missing while a qualifying 4-5
-  point VUS exists in the layer findings above, add it.
+  a layer/base block above stating a total ACMG point value that is >= 4 AND
+  < 6 (4, 4.5, 5, or 5.5 — a half-point total from a reduced-weight PM3 delta
+  counts as in-range) AND a classification of "Uncertain significance"/"VUS".
+  Remove any section-4 entry whose own block shows a point total outside
+  [4, 6) or a different classification. If section 4 is missing (or says
+  "None identified") while a qualifying VUS in [4, 6) exists in the layer
+  findings above — including a 4.5- or 5.5-point one — add it; do not let it
+  surface only in section 5's summary sentence instead.
 
 If you find no contradictions, output the draft unchanged.
 If you find contradictions, output a corrected version with the same

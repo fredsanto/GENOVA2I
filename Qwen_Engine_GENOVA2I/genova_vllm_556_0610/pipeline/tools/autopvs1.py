@@ -181,6 +181,33 @@ def _is_valid_hgvs(s: str) -> bool:
     return bool(s) and bool(re.match(r"^(NM_|NR_|ENST)\d+", s, re.IGNORECASE)) and ":c." in s
 
 
+_CLEAN_HGVS_RE = re.compile(
+    r"(N[MR]_\d+(?:\.\d+)?|ENST\d+(?:\.\d+)?)[^|]*?(c\.[^\s|]+)"
+)
+
+
+def _clean_transcript_hgvs(raw: str) -> str:
+    """
+    Extract a bare 'TRANSCRIPT:c.CHANGE' string from a raw HGVS field.
+
+    The canonical HGVS field is not always already in that bare form — it can be
+    gene-prefixed ('GENE:NM_xxx:exonN:c.xxx', as produced by some ANNOVAR-style
+    annotators), carry a trailing protein annotation ('... p.(Xxx)'), or list
+    multiple transcripts pipe-separated ('GENE:NM_1:...|GENE:NM_2:...'). AutoPVS1's
+    /search endpoint only accepts the bare 'transcript:c.change' form and only
+    needs one transcript, so this strips gene prefix / exon segment / protein
+    suffix / extra transcripts down to that.
+
+    Returns "" if no transcript:c. pattern is found anywhere in raw.
+    """
+    if not raw:
+        return ""
+    m = _CLEAN_HGVS_RE.search(raw)
+    if not m:
+        return ""
+    return f"{m.group(1)}:{m.group(2)}"
+
+
 def _is_intergenic_result(d: dict) -> bool:
     """True when AutoPVS1 returned an intergenic hit or no gene — unusable result."""
     return (d.get("variant_type") or "").lower() == "intergenic" or d.get("gene") is None
@@ -364,7 +391,7 @@ def fetch_and_format_autopvs1(
     Returns a multi-line string ready to embed in the augmented context,
     or None if the fetch failed or returned unusable data.
     """
-    hgvs_clean = hgvs.split()[0] if hgvs else ""   # "NM_012186:c.720C>A"
+    hgvs_clean = _clean_transcript_hgvs(hgvs)      # "NM_012186:c.720C>A"
     d: dict | None = None
     variant_id: str = vcf_to_autopvs1_id(chrom, pos, ref, alt)  # fallback label
 
@@ -462,6 +489,41 @@ _CLEAR_NON_LOF_TYPES = {
     "intergenic", "upstream", "downstream",
 }
 
+# Minimum SpliceAI max-delta to override the synonymous/silent fast-NO below.
+# ACMG/ClinGen SVI: a synonymous change is not exempt from PVS1 — it can
+# disrupt an exonic splicing enhancer/silencer or create a cryptic splice
+# site without altering the encoded residue. 0.5 matches SpliceAI's own
+# "MODERATE splice impact" band (see spliceai.py::_interpret).
+_SPLICE_OVERRIDE_THRESHOLD = 0.5
+
+_SPLICEAI_MAX_DELTA_RE = re.compile(r"Max delta\s*:\s*([\d.]+)")
+
+
+def _spliceai_max_delta(context: "ToolContext") -> float | None:
+    """
+    Best-effort max SpliceAI delta score for the current variant, checked
+    before letting a synonymous/silent Type call PVS1 not-applicable.
+    Prefers a precomputed canonical SpliceAI_score field (from the input
+    CSV); falls back to parsing this run's own spliceai tool output.
+    """
+    raw = context.field("SpliceAI_score")
+    if raw and raw != "NA":
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+
+    spliceai_output = context.all_outputs.get("spliceai")
+    if spliceai_output:
+        m = _SPLICEAI_MAX_DELTA_RE.search(spliceai_output)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                pass
+
+    return None
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PIPELINE TOOL CLASS
@@ -495,6 +557,23 @@ class AutoPVS1Tool(NetworkTool):
             # but exclude if it's clearly synonymous p.(X=)
             if "=" not in hgvs_val:
                 print(f"[PVS1 gate] YES (hgvs clue) — hgvs: {hgvs_val}")
+                return True
+
+        # ── Synonymous/silent override ──────────────────────────────────────
+        # A synonymous change does not preclude PVS1: it can still disrupt a
+        # splice site or exonic splicing enhancer. Check SpliceAI evidence
+        # before letting the type-based fast-NO below silently exempt it.
+        is_synonymous = (
+            any(t in type_val for t in ("synonymous", "silent"))
+            or re.search(r"p\.\([a-z]+\d+=\)", hgvs_val)
+        )
+        if is_synonymous:
+            max_ds = _spliceai_max_delta(context)
+            if max_ds is not None and max_ds >= _SPLICE_OVERRIDE_THRESHOLD:
+                print(
+                    f"[PVS1 gate] YES (SpliceAI override, delta={max_ds:.2f}) "
+                    f"— type: {type_val} hgvs: {hgvs_val}"
+                )
                 return True
 
         # ── Fast NO ──────────────────────────────────────────────────────────
@@ -546,10 +625,19 @@ class AutoPVS1Tool(NetworkTool):
         then call fetch_and_format_autopvs1().
         Returns the formatted evidence block, or None if AutoPVS1 has no
         usable result (intergenic, gene mismatch, fetch failure).
-        Raises ToolParseError if coordinates cannot be extracted at all —
-        the gate already confirmed this variant is LoF-eligible, so an
-        unparseable Variant/HGVS string here is a data problem, not a skip.
+        Raises ToolParseError only when BOTH VCF-coord extraction AND a bare
+        transcript HGVS extraction fail — the gate already confirmed this
+        variant is LoF-eligible, so having neither usable input is a data
+        problem, not a skip. When coords are unparseable but the HGVS field
+        yields a clean 'transcript:c.change' string (see
+        `_clean_transcript_hgvs`), that alone is enough: AutoPVS1's
+        HGVS-search path resolves canonical coordinates itself, so the VCF
+        coords below only matter as a fallback query/label if that search
+        also fails downstream.
         """
+        hgvs_raw = variant.get("HGVS", "")
+        clean_hgvs = _clean_transcript_hgvs(hgvs_raw)
+
         try:
             coords = parse_variant_coords(
                 variant_str=variant.get("Variant", ""),
@@ -559,13 +647,19 @@ class AutoPVS1Tool(NetworkTool):
                 alt_field=variant.get("Var_seq", ""),
             )
         except ValueError as e:
-            raise ToolParseError(f"AutoPVS1: {e}") from e
+            if not _is_valid_hgvs(clean_hgvs):
+                raise ToolParseError(f"AutoPVS1: {e}") from e
+            chrom = variant.get("Chromosome", "") or "NA"
+            pos   = variant.get("Position", "") or "NA"
+            ref   = variant.get("Ref_seq", "") or "N"
+            alt   = variant.get("Var_seq", "") or "N"
+        else:
+            chrom, pos, ref, alt = coords
 
-        chrom, pos, ref, alt = coords
         try:
             result = fetch_and_format_autopvs1(
                 chrom, pos, ref, alt,
-                hgvs=variant.get("HGVS", ""),
+                hgvs=hgvs_raw,
                 hg=context.genome_build,
                 expected_gene=variant.get("Gene", ""),
             )

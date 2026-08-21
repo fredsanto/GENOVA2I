@@ -94,9 +94,16 @@ def detect_genome_build(variants: list[dict]) -> str:
                 ref_field=variant.get("Ref_seq", ""),
                 alt_field=variant.get("Var_seq", ""),
             )
-        except ValueError:
+        except (ValueError, AttributeError, TypeError):
             # Sampling loop — unparseable candidates are expected (indels,
-            # missing fields) and simply don't count toward the vote.
+            # missing fields, or a non-string Variant field slipping through
+            # as a bare float NaN) and simply don't count toward the vote.
+            # A real observed failure: an unmapped "Variant" field reaching
+            # here as a float (not "NA") raised AttributeError on .strip(),
+            # which escaped this loop uncaught and silently killed the whole
+            # background pipeline task (see server_qwen.py's fire-and-forget
+            # asyncio.create_task(_run_direct(...)) — nothing awaited it, so
+            # the job just hung forever with no error ever surfaced).
             continue
         chrom, pos, ref, alt = coords
         if len(ref) != 1 or len(alt) != 1 or ref in ("-", "") or alt in ("-", ""):
