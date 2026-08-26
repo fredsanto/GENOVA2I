@@ -138,6 +138,10 @@ async def _push_event(job_id: str, event: dict) -> None:
     async with _lock:
         if job_id in _jobs:
             _jobs[job_id]["events"].append(event)
+            # Slide the TTL on every event so a still-running job (heavy full
+            # pipeline, many variants + web search) never gets swept mid-flight
+            # just because it started more than max_age ago.
+            _jobs[job_id]["ts"] = datetime.now().timestamp()
 
 
 async def _finish_job(job_id: str) -> None:

@@ -34,11 +34,24 @@ logger = logging.getLogger(__name__)
 _PROMPT_PATH        = Path(__file__).parent.parent.parent / "prompts" / "clinical_conclusion.txt"
 _REVISE_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "final_conclusion_revise.txt"
 
-MAX_NEW_TOKENS_FINAL_CONCLUSION = 1500
+MAX_NEW_TOKENS_FINAL_CONCLUSION = 3000
 
 # With --max-model-len 16384, leave 2000 tokens for prompt template + output.
 # ~4 chars per token → 14384 × 4 = 57536 chars safe budget for the conclusions block.
 _MAX_CONCLUSIONS_CHARS = 50_000
+
+# A real past failure: the model burned its whole token budget on rambling
+# self-revision in STEP 2 (e.g. "*Wait*, looking closer... Re-reading the
+# rule...") and got cut off mid-sentence in section 2, before ever reaching
+# section 5 — but still contained the "# Clinical Conclusion" header, so the
+# header-only check below let the truncated output through silently. Requiring
+# every numbered section marker catches this: a genuinely truncated response
+# is missing at least "5)" (the last section written).
+_REQUIRED_SECTION_MARKERS = ("1)", "2)", "3)", "4)", "5)")
+
+
+def _is_well_formed(text: str) -> bool:
+    return "# Clinical Conclusion" in text and all(m in text for m in _REQUIRED_SECTION_MARKERS)
 
 
 def _load_prompt(path: Path = _PROMPT_PATH) -> str:
@@ -159,8 +172,17 @@ def run(
         logger.warning("[FinalConclusion] Revise pass failed (%s) — using unrevised draft.", exc)
         return draft
 
-    if "# Clinical Conclusion" not in revised:
-        logger.warning("[FinalConclusion] Revise pass produced malformed output — using unrevised draft.")
-        return draft
+    if not _is_well_formed(revised):
+        if _is_well_formed(draft):
+            logger.warning(
+                "[FinalConclusion] Revise pass produced malformed/truncated output "
+                "(missing a numbered section) — using unrevised draft."
+            )
+            return draft
+        logger.warning(
+            "[FinalConclusion] Both draft and revise passes are malformed/truncated "
+            "(missing a numbered section) — using whichever is longer."
+        )
+        return revised if len(revised) >= len(draft) else draft
 
     return revised

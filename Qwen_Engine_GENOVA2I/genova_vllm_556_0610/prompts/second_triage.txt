@@ -33,6 +33,26 @@ INCLUDE requires evidence for BOTH:
    specific phenotype (even while discussing the gene in some other disease context),
    treat criterion 1 as NOT met.
 
+   Do not translate one evidence track's silence into an explicit denial. "Literature
+   explicitly denies this gene causes the phenotype" is a much stronger claim than
+   "this particular search/abstract set did not confirm a match" — only use denial
+   language when a source directly and affirmatively states the gene does NOT cause
+   the phenotype (rare). If the variant record includes multiple literature tracks
+   (e.g. a gene-level PubMed block AND a separate LitVar2 variant-level block), a
+   phenotype match reported in EITHER block satisfies criterion 1 for that gene, even
+   if only reported at the cohort/gene level rather than confirmed for this specific
+   variant, and even if a different track for the same gene found only unrelated
+   conditions. A real past failure: a gene's own LitVar2 variant-level evidence
+   reported a cohort of patients with optic atrophy (a visual-impairment phenotype)
+   attributed to variants in that gene, but because the separate gene-level PubMed
+   track had turned up only unrelated neurodevelopmental-disorder papers, the case
+   was EXCLUDEd with "literature explicitly denies [gene] causes visual impairment" —
+   this is backwards: the optic-atrophy finding satisfies criterion 1 on its own; a
+   different track finding no match does not cancel it out. Cite the matching finding
+   and note the variant-specific gap (not confirmed for this exact variant) as a
+   caveat in the Exclude-case text, never as grounds to claim no gene-phenotype link
+   exists at all.
+
 2. PROBABLE PATHOGENICITY — the variant itself is likely damaging:
    - ClinVar Pathogenic or Likely pathogenic — but a ClinVar P/LP call is only as
      strong as the disease it's actually paired with. Check the ClinVar "Conditions"

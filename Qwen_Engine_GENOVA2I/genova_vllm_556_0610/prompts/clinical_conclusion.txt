@@ -76,7 +76,16 @@ the pair only under section 4 (Notable VUS) if either variant's own total is
 >= 4 and < 6 points, per the normal VUS rule.
 
 STEP 2 — For each layer's findings, list the variant(s)/layer(s) that
-together explain the phenotype, applying the CAUSATIVE THRESHOLD RULE above:
+together explain the phenotype, applying the CAUSATIVE THRESHOLD RULE above.
+Decide each variant's status ONCE, in 1-3 sentences, and move on — do not
+write multiple rounds of reconsideration for the same variant (no "Wait,
+looking closer...", "Re-reading the rule...", "Correction/Refinement:", or
+similar backtracking prose). A real past failure: the model spent several
+paragraphs re-arguing a single borderline variant (SPATA13) back and forth
+before ever reaching the # Clinical Conclusion section, and the response was
+cut off by the token budget before section 5 was ever written — every
+variant after the one it got stuck on was silently lost. State the decision
+and its one-sentence reason, then continue to the next variant:
 - A RECESSIVE layer block of the "(compound heterozygous / biallelic)" PAIR
   kind covers BOTH its variants jointly (they are presented as co-causative,
   not competing) ONLY when its own "**Joint compound-het classification:**"

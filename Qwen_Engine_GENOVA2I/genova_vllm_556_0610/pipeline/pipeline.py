@@ -1035,18 +1035,34 @@ class Pipeline:
         #     too, e.g. a de novo MECP2 variant confirmed absent in both
         #     parents; the moi_xlinked layer only ever adds PP1, never PS2,
         #     so without this a confirmed-de-novo X-linked variant would get
-        #     zero credit for that despite trio data confirming it) ─────────
+        #     zero credit for that despite trio data confirming it.
+        #     Also requires SOME parental AB data (trio or one parent): the
+        #     prompt's own rule 3 says PS2/PM6 can NEVER apply when parental
+        #     data is "none" — running the layer anyway on a singleton just
+        #     produces a boilerplate "de novo status unassessed" section for
+        #     every AD-relevant variant in every singleton case, which is
+        #     exactly the redundant-MOI-section clutter this gate exists to
+        #     avoid.) ──────────────────────────────────────────────────────
         denovo_genes = {
             g for g, m in gene_mode_cache.items()
             if m in ("AD", "AD_AR", "XLD", "XLR", "XLD_XLR", "XL")
         }
-        denovo_targets = [i for i in include_indices if variants[i].get("Gene", "NA") in denovo_genes]
-        denovo_outputs: dict[int, str] = {}
 
-        def _denovo_one(i: int) -> tuple[int, str]:
+        def _parental_ab_presence(i: int) -> tuple[bool, bool]:
             ab_entry = parental_ab[i] if parental_ab else {}
             has_trio = segregation.has_parent_data(ab_entry)
             has_one_parent = (not has_trio) and segregation.has_any_parent_data(ab_entry)
+            return has_trio, has_one_parent
+
+        denovo_targets = [
+            i for i in include_indices
+            if variants[i].get("Gene", "NA") in denovo_genes
+            and any(_parental_ab_presence(i))
+        ]
+        denovo_outputs: dict[int, str] = {}
+
+        def _denovo_one(i: int) -> tuple[int, str]:
+            has_trio, has_one_parent = _parental_ab_presence(i)
             return i, moi_denovo.run_one(
                 variant_context=context_slices[i],
                 base_conclusion=conclusions[i],
@@ -1071,9 +1087,24 @@ class Pipeline:
         # ── Layer 4: dominant-inherited (AD / AD_AR / XLD only — narrower than
         #     Layer 3's de novo gene set. "Cosegregation with an affected
         #     parent" framing doesn't fit XLR/XL genes, which Layer 3 now
-        #     covers for de novo purposes but Layer 4 deliberately excludes) ─
+        #     covers for de novo purposes but Layer 4 deliberately excludes.
+        #     Also requires segregation to actually be "maternal" or
+        #     "paternal": the prompt's own rule 1 says PP1 can NEVER apply
+        #     otherwise (de_novo, insufficient_data, uncertain, both_carriers,
+        #     homozygous_parent all fall through to the same "does not fit,
+        #     no PP1" boilerplate) — gating here on the same condition the
+        #     prompt already gates on avoids paying for an LLM call whose
+        #     output is 100% predictable, and avoids a redundant
+        #     DOMINANT-INHERITED section on every AD-relevant variant in
+        #     every singleton (no-parent-data) case, which was the actual
+        #     bulk of the "still see dominant" reports — not just the
+        #     confirmed-de-novo case this gate originally only covered.) ──
         dominant_genes = {g for g, m in gene_mode_cache.items() if m in ("AD", "AD_AR", "XLD")}
-        dominant_targets = [i for i in include_indices if variants[i].get("Gene", "NA") in dominant_genes]
+        dominant_targets = [
+            i for i in include_indices
+            if variants[i].get("Gene", "NA") in dominant_genes
+            and segregation_cache[i] in ("maternal", "paternal")
+        ]
         dominant_outputs: dict[int, str] = {}
 
         def _dominant_one(i: int) -> tuple[int, str]:
