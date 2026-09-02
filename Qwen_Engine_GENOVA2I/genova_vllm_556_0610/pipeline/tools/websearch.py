@@ -12,6 +12,7 @@ contract). They inherit from NetworkTool for the HTTP helpers and the shared
 name/description fields, but override run(query: str) for ReActAgent compatibility.
 """
 
+import os
 import re
 import time
 import threading
@@ -32,7 +33,13 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 NCBI_BASE      = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-NCBI_MIN_DELAY = 0.34          # seconds between calls → stays under 3 req/s limit
+# Set NCBI_API_KEY env var (free key from https://www.ncbi.nlm.nih.gov/account/)
+# to raise the anonymous 3 req/s cap to 10 req/s — same key litvar2.py already
+# supports. This module previously ignored it entirely, hardcoding every NCBI
+# call in this file (ClinGen allele resolution, ClinVar gene/variant stats) to
+# the anonymous rate regardless of whether a key was configured.
+NCBI_API_KEY   = os.environ.get("NCBI_API_KEY", "")
+NCBI_MIN_DELAY = 0.11 if NCBI_API_KEY else 0.34   # 10 req/s with key, else 3 req/s
 DEFAULT_TIMEOUT  = 15          # seconds
 DEFAULT_MAX_CHARS = 3000       # safe default — main.py can override per tool instance
 
@@ -86,21 +93,52 @@ NON_ASCII_THRESHOLD = 0.3     # reject page if >30 % of chars are non-ASCII
 def _ncbi_get(endpoint: str, params: dict, timeout: int = DEFAULT_TIMEOUT) -> requests.Response:
     """
     Wrapper around NCBI E-utilities GET requests.
-    Uses a global rate limiter (not per-thread sleep) to stay under 3 req/s.
-    Retries up to 4 times on 429 with exponential backoff.
+    Uses a global rate limiter (not per-thread sleep) to stay under the
+    per-process request-rate cap (3 req/s anonymous, 10 req/s with
+    NCBI_API_KEY set — see NCBI_MIN_DELAY above). Attaches api_key
+    automatically when configured, same as litvar2.py already does.
+    Retries up to 4 times with exponential backoff on 429 AND on transient
+    network failures (timeout, connection error, 5xx) — a real past failure:
+    this previously retried ONLY on 429, so a plain timeout or connection
+    reset (which is common under the multi-process load this pipeline
+    generates against NCBI — several server processes on this cluster share
+    one outbound IP, each independently rate-limiting itself but combining
+    to exceed NCBI's real server-side limit) raised immediately with zero
+    retry, and callers that swallow exceptions locally (e.g.
+    clinvar_gene_stats.py's _resolve_variation_id) then reported a
+    definitive-sounding "not resolvable" for a variant that was never
+    actually queried.
     """
     url = f"{NCBI_BASE}/{endpoint}"
+    if NCBI_API_KEY:
+        params = {**params, "api_key": NCBI_API_KEY}
     logger.debug("NCBI GET %s params=%s", endpoint, params)
+    last_exc: Exception | None = None
     for attempt in range(4):
         _ncbi_ws_rate_limit()
-        resp = requests.get(url, params=params, timeout=timeout)
-        if resp.status_code == 429:
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_exc = e
             wait = 2.0 ** attempt
-            logger.warning("NCBI rate limit (429) — backing off %.0fs (attempt %d/4)", wait, attempt + 1)
+            logger.warning(
+                "NCBI request failed (%s) — retrying in %.0fs (attempt %d/4)",
+                type(e).__name__, wait, attempt + 1,
+            )
+            time.sleep(wait)
+            continue
+        if resp.status_code == 429 or resp.status_code >= 500:
+            wait = 2.0 ** attempt
+            logger.warning(
+                "NCBI %d response — backing off %.0fs (attempt %d/4)",
+                resp.status_code, wait, attempt + 1,
+            )
             time.sleep(wait)
             continue
         resp.raise_for_status()
         return resp
+    if last_exc is not None:
+        raise last_exc
     resp.raise_for_status()
     return resp
 

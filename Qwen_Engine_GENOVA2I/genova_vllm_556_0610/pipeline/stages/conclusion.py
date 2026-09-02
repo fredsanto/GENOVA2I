@@ -28,7 +28,8 @@ from pipeline.core.acmg_pp2_bp1 import validate_pp2_bp1
 from pipeline.core.acmg_ps1_pm5 import validate_ps1_pm5
 from pipeline.core.acmg_bp6 import validate_bp6
 from pipeline.core.acmg_pp4 import validate_pp4
-from pipeline.core.acmg_points import relabel_all_points_lines
+from pipeline.core.acmg_pvs1 import validate_pvs1
+from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -101,12 +102,18 @@ def run_one(
     result = validate_ps1_pm5(result, variant_context)
     result = validate_bp6(result)
     result = validate_pp4(result)
-    # Unconditional final pass: the validators above only re-derive the
-    # classification label (via adjust_points_line -> classify()) when they
-    # actively strip a criterion. If none fire, the SLM's own raw "ACMG
-    # points: N -> Label" line is never independently checked — a real
-    # observed failure had the SLM write "4.5 -> Likely Pathogenic" for a
-    # variant whose points value is in the 0-5 VUS band, not 6-9. Re-derive
-    # every points line's label from its own stated N unconditionally so this
-    # can't slip through undetected.
+    result = validate_pvs1(result, variant_context)
+    # Unconditional final pass: the validators above only adjust the stated
+    # total when THEY strip a criterion. They never check whether the SLM's
+    # own original total already matched its own criteria list — a real,
+    # recurring observed failure: a list totalling PS3(+4)+PM2(+2)+PP4(+1) =
+    # 7 stated as "ACMG points: 11", with nothing here to catch it since no
+    # criterion needed stripping. Re-sum every points/classification line
+    # from its own preceding criteria bullets and correct the stated total
+    # (and label) whenever it disagrees.
+    result = recompute_and_fix_totals(result)
+    # Final safety net: re-derive any remaining line's label from its own
+    # stated N (e.g. "4.5 -> Likely Pathogenic" when 4.5 is in the 0-5 VUS
+    # band, not 6-9) — covers the case recompute_and_fix_totals() left
+    # untouched (no criteria bullets found to check against).
     return relabel_all_points_lines(result)

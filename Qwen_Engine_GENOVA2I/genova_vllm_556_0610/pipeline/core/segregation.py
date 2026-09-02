@@ -9,11 +9,16 @@ X-linked). Thresholds match what was already established elsewhere in this
 codebase rather than inventing new numbers:
   - 0.3-0.7  -> het   (prompts/reasoning.txt)
   - >0.8     -> hom   (prompts/reasoning.txt)
-  - <0.1     -> absent / de-novo signal (pipeline.py's existing 0.1 threshold)
+  - <0.2     -> absent / de-novo signal (raised from the original <0.1 cutoff
+               so a low-but-nonzero trace read, e.g. AB=0.10, still counts as
+               "absent" for segregation-pattern purposes rather than forcing
+               the whole trio to "uncertain" — see classify_ab_ratio's and
+               mosaicism_note()'s docstrings for the worked case this fixes)
 
 Public API:
     has_parent_data(ab_entry) -> bool
     classify_ab_ratio(value) -> "het" | "hom" | "absent" | "uncertain"
+    mosaicism_note(ab_entry) -> str  (caveat suffix, or "")
     classify_segregation(proband_ab, mother_ab, father_ab) -> str
     classify_phase(segregation_a, segregation_b) -> "cis" | "trans" | "unknown"
     classify_xlinked_ab(proband_ab, mother_ab) -> "XLR" | "XLD" | "uncertain"
@@ -53,20 +58,61 @@ def has_any_parent_data(ab_entry: dict | None) -> bool:
 def classify_ab_ratio(value) -> str:
     """Bucket a single allelic-balance value. Unparseable/missing values are
     "uncertain", not silently treated as 0 or skipped — callers must handle
-    "uncertain" explicitly rather than assuming a numeric fallback."""
+    "uncertain" explicitly rather than assuming a numeric fallback.
+
+    "absent" threshold is <0.2 (not <0.1): a parent read at, say, AB=0.10-0.19
+    still counts as absent for segregation-pattern purposes (de novo/maternal/
+    paternal calls should not be blocked by a low-but-present trace read), but
+    that same low-but-nonzero band is flagged separately as possible low-level
+    parental mosaicism by mosaicism_note() below — a real past case: a mother's
+    AB=0.10 for a variant with father AB=0 fell just outside the old <0.1 cutoff
+    and forced the whole trio to "uncertain" instead of "de_novo", even though
+    a 0.10 trace read is far more consistent with maternal mosaicism (or assay
+    noise) than with the mother being a true heterozygous carrier (which would
+    read close to 0.5) — de novo is the correct call here, with a mosaicism
+    caveat, not a withheld call."""
     if not _is_present(value):
         return "uncertain"
     try:
         v = float(value)
     except (TypeError, ValueError):
         return "uncertain"
-    if v < 0.1:
+    if v < 0.2:
         return "absent"
     if 0.3 <= v <= 0.7:
         return "het"
     if v > 0.8:
         return "hom"
-    return "uncertain"  # falls in the 0.1-0.3 or 0.7-0.8 gap — genuinely ambiguous
+    return "uncertain"  # falls in the 0.2-0.3 or 0.7-0.8 gap — genuinely ambiguous
+
+
+def mosaicism_note(ab_entry: dict | None) -> str:
+    """Returns a short parenthetical caveat when a parent classified as
+    "absent" (per classify_ab_ratio's <0.2 threshold above) has a nonzero AB
+    reading (roughly 0.02-0.2, not a clean 0) — i.e. some alt-allele reads
+    were actually observed in that parent, just not enough to call them a
+    confirmed heterozygous carrier. This does not change the segregation
+    classification (de novo/maternal/paternal calls still stand) — it is a
+    caveat to surface alongside the call, not a reason to withhold it, since
+    low-level mosaicism in a parent has real recurrence-risk implications for
+    genetic counseling even when it doesn't change the proband's own ACMG
+    classification. Returns "" when neither parent shows this pattern."""
+    if not ab_entry:
+        return ""
+    flags = []
+    for label, key in (("mother", "mother"), ("father", "father")):
+        raw = ab_entry.get(key)
+        if not _is_present(raw):
+            continue
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if 0.02 < v < 0.2:
+            flags.append(f"{label} AB={v:g}")
+    if not flags:
+        return ""
+    return f" (possible low-level parental mosaicism — {', '.join(flags)})"
 
 
 def classify_segregation(proband_ab, mother_ab, father_ab) -> str:

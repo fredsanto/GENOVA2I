@@ -26,6 +26,19 @@ TASK:
    says; state explicitly that de novo status alone does not substitute for
    a frequency check.
 
+   MOSAICISM CAVEAT (does not block PS2): SEGREGATION may read
+   "de_novo (possible low-level parental mosaicism — mother/father AB=X.XX)"
+   — this still counts as "states de_novo" for the purposes of this rule; a
+   trace-level AB reading in a parent (a small but nonzero number, not a
+   clean 0) is more consistent with low-level parental mosaicism or assay
+   noise than with that parent being a true heterozygous carrier, which
+   would read close to 0.5. Apply PS2 normally, but carry the caveat text
+   into the Comment field so it is visible to a genetic counselor (a mosaic
+   parent has real recurrence-risk implications for future pregnancies,
+   even though it doesn't change this variant's own ACMG classification).
+   Do not treat this caveat as a reason to withhold PS2 or fall back to
+   "uncertain" — SEGREGATION already resolved that question deterministically.
+
 2. If PARENTAL DATA STATUS is "partial (one parent only)": de novo status
    cannot be confirmed with a trio. If the available parent's data supports
    the variant being absent in that parent (consistent with, but not proof

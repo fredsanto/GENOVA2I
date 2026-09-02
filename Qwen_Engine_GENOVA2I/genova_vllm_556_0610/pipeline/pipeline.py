@@ -537,6 +537,37 @@ class Pipeline:
 
         process_details = _build_process_details(self._executor.process_log, variants)
 
+        # ── Proband allelic-balance artifact gate (deterministic, pre-triage) ───
+        # A variant whose own Zygosity field claims a called genotype (het/hom/
+        # hemi/...) but whose own proband Allelic_balance is anomalously low
+        # (<0.1, segregation.classify_ab_ratio's "absent" bucket) has essentially
+        # zero alt-allele read support in THIS patient — that is a sequencing
+        # artifact or miscall, not a real variant, regardless of how strong its
+        # ACMG evidence looks. This must be excluded before any SLM call, not
+        # left as a prose caveat for a later synthesis step to reason past.
+        # A real past failure: a compound-het pair's second variant had
+        # Allelic_balance_proband=0.00 (Qual_comment=Poor in the source CSV,
+        # itself never mapped/surfaced downstream) yet was still carried
+        # through to the final report as a causative co-finding — the artifact
+        # caveat reached the SLM only as prose ("AB=0.00... suggests artifact"),
+        # and the synthesis step reasoned past it anyway ("the joint
+        # classification overrides this for the purpose of the diagnosis").
+        # Removing the variant here leaves nothing left to reason past.
+        artifact_indices: set[int] = set()
+        for i, v in enumerate(variants):
+            zygosity = str(v.get("Zygosity", "") or "").strip().lower()
+            if zygosity in ("", "na", "none"):
+                continue
+            if segregation.classify_ab_ratio(v.get("Allelic_balance")) == "absent":
+                artifact_indices.add(i)
+                logger.info(
+                    "[Pipeline] Proband AB artifact: variant %d (%s) Zygosity=%s "
+                    "but Allelic_balance=%s (<0.1) — excluding as sequencing "
+                    "artifact/miscall, not a real finding in this patient.",
+                    i + 1, v.get("Gene", "?"), v.get("Zygosity", "?"),
+                    v.get("Allelic_balance", "?"),
+                )
+
         # ── ACMG Secondary Findings (SF v3.2) actionable-gene detection ─────────
         # Computed on ALL variants (not just kept ones) right after retrieval, so
         # it can force-exempt flagged variants from triage/second-triage discard
@@ -586,7 +617,21 @@ class Pipeline:
                 for future in as_completed(futures):
                     i, decision, justification = future.result()
                     gene = variants[i].get("Gene", "?")
-                    if decision == "DISCARD" and i in actionable_indices:
+                    if i in artifact_indices:
+                        # Unconditional — takes precedence over every KEEP
+                        # override below (ACMG SF, compound-het, LoF-in-gene):
+                        # a variant not actually present in the proband cannot
+                        # be a real actionable/causative/compound-het finding
+                        # no matter what those overrides would otherwise argue.
+                        justification = (
+                            f"[proband AB artifact — Allelic_balance="
+                            f"{variants[i].get('Allelic_balance', '?')} contradicts "
+                            f"Zygosity={variants[i].get('Zygosity', '?')}; excluded "
+                            f"as sequencing artifact/miscall, not a real finding in "
+                            f"this patient]"
+                        )
+                        decision = "DISCARD"
+                    elif decision == "DISCARD" and i in actionable_indices:
                         logger.info(
                             "[Pipeline] Triage override: variant %d (%s) is an ACMG SF "
                             "actionable finding — forced KEEP", i + 1, gene,
@@ -619,9 +664,20 @@ class Pipeline:
                         decision = "KEEP"
                     triage_results[i] = (decision, justification)
         else:
-            # No triage — all variants kept
+            # No triage — all variants kept, EXCEPT proband-AB artifacts, which
+            # are excluded unconditionally regardless of the triage threshold.
             for i in range(n):
-                triage_results[i] = ("KEEP", "")
+                if i in artifact_indices:
+                    triage_results[i] = (
+                        "DISCARD",
+                        f"[proband AB artifact — Allelic_balance="
+                        f"{variants[i].get('Allelic_balance', '?')} contradicts "
+                        f"Zygosity={variants[i].get('Zygosity', '?')}; excluded "
+                        f"as sequencing artifact/miscall, not a real finding in "
+                        f"this patient]",
+                    )
+                else:
+                    triage_results[i] = ("KEEP", "")
 
         kept_indices     = [i for i, (dec, _) in triage_results.items() if dec == "KEEP"]
         discarded_indices = [i for i, (dec, _) in triage_results.items() if dec == "DISCARD"]
@@ -1063,10 +1119,17 @@ class Pipeline:
 
         def _denovo_one(i: int) -> tuple[int, str]:
             has_trio, has_one_parent = _parental_ab_presence(i)
+            # Append the mosaicism caveat (if any) to the TEXT handed to the
+            # prompt only — segregation_cache[i] itself must stay the bare
+            # canonical string ("de_novo"/"maternal"/...) since it's also
+            # used elsewhere for exact-match control flow (classify_phase(),
+            # the maternal/paternal membership checks below).
+            ab_entry = parental_ab[i] if parental_ab else {}
+            seg_text = segregation_cache[i] + segregation.mosaicism_note(ab_entry)
             return i, moi_denovo.run_one(
                 variant_context=context_slices[i],
                 base_conclusion=conclusions[i],
-                segregation=segregation_cache[i],
+                segregation=seg_text,
                 has_trio=has_trio,
                 has_one_parent=has_one_parent,
                 llm=self._llm,
@@ -1409,7 +1472,11 @@ class Pipeline:
                 f"\n{SEP_VARIANT}\nACTIONABLE VARIANTS (ACMG SF)\n{SEP_VARIANT}\n\n{actionable_section}\n"
             )
 
-        if triage_ran and (exclude_indices or discarded_indices):
+        # Not gated on triage_ran: the proband-AB-artifact gate can populate
+        # discarded_indices even when n <= TRIAGE_ENABLED_THRESHOLD (SLM
+        # triage skipped) — those discards must still be visible in the
+        # appendix, not silently dropped from the report.
+        if exclude_indices or discarded_indices:
             final_report += _build_report_appendix(
                 exclude_indices=exclude_indices,
                 discarded_indices=discarded_indices,

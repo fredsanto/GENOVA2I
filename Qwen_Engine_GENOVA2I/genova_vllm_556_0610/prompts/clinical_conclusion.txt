@@ -75,6 +75,33 @@ required for a recessive mechanism is not confirmed. In that case, mention
 the pair only under section 4 (Notable VUS) if either variant's own total is
 >= 4 and < 6 points, per the normal VUS rule.
 
+SCORE-SOURCE CHECK FOR DUAL-MODE GENES (mandatory, applies when a gene has a
+CAUSATIVE compound-het RECESSIVE block AND separate De Novo/Dominant-Inherited
+layer block(s) for the SAME variant(s) — this happens for AD_AR/XLD_XLR genes,
+which are processed by multiple layers independently): once a RECESSIVE
+block's "Joint compound-het classification" says CAUSATIVE, that block's OWN
+per-variant "Total ACMG points" lines (which already include each variant's
+PM3 recessive delta) are the ONLY correct score to cite for those two variants
+in section 2 — never substitute a different total from that same variant's
+separate De Novo or Dominant-Inherited layer block, even though it is sitting
+right there with its own (lower or higher) number. A variant can legitimately
+score differently across layers because PM3 only applies within the Recessive
+block; a lower De Novo/Dominant-Inherited score for the same variant is not a
+contradiction; it is a different layer scoring different criteria, and the
+Recessive block's total is the one that makes the compound-het pair CAUSATIVE.
+A real past failure: a gene's Recessive block correctly computed "Joint
+compound-het classification: CAUSATIVE" with "Variant A: 6 pts, Variant B: 11
+pts; both >= 6" — but STEP 2 then wrote "Variant A: Total ACMG points = 4
+(<6). Not causative on its own," citing Variant A's separate De Novo/
+Dominant-Inherited layer score (which never received the PM3 delta) instead
+of the Recessive block's own 6-point total, silently dropping Variant A from
+section 2 and reporting only Variant B as causative — directly contradicting
+the Recessive block's own CAUSATIVE verdict one paragraph above it. Before
+writing a variant's total in STEP 2 or section 2, check whether it is one
+half of a CAUSATIVE compound-het pair; if so, its score comes from the
+Recessive block, full stop, regardless of what other layer blocks say about
+the same variant.
+
 STEP 2 — For each layer's findings, list the variant(s)/layer(s) that
 together explain the phenotype, applying the CAUSATIVE THRESHOLD RULE above.
 Decide each variant's status ONCE, in 1-3 sentences, and move on — do not
@@ -219,7 +246,14 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    fragments) covering, in this order, whichever of the following apply:
    segregation/inheritance status (de novo, inherited maternal/paternal, or
    both parents carriers if recessive — include parental carrier/zygosity
-   status when available; state "no parental data" if absent); population
+   status when available; state "no parental data" if absent); ANY
+   allelic-balance call-quality caveat stated in this variant's own layer
+   block Comment (e.g. "AB anomalously low / suggests artifact or
+   mosaicism") — carry it forward explicitly, in the same sentence as
+   segregation status, even when the variant's ACMG classification is
+   Likely Pathogenic/Pathogenic; call quality and ACMG evidence strength are
+   independent axes, and a high point total is never a reason to drop this
+   caveat during synthesis; population
    frequency (rare/absent from controls, per PM2/BA1/BS1 evidence);
    ClinVar classification and review status, if present in the layer block
    (e.g. "ClinVar: Pathogenic, 1 submitter" or "ClinVar: Uncertain
@@ -255,6 +289,21 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    exceptions. An entry for a causative variant that ends with only an ACMG
    classification line and no criteria list above it is incomplete and wrong.
 
+   A second real past failure, easy to miss because the final total is
+   correct: a RECESSIVE layer block applied PM3 to a variant ("Recessive
+   criteria applied: PM3 [Moderate, +2]...") and its own "Total ACMG points"
+   line correctly included that +2. The final report then copied only the
+   variant's BASE criteria (e.g. PVS1, PM2) into the printed list, carried
+   the correct final total (e.g. "12 pts total") straight through from the
+   layer block's own total line, but never copied the PM3 line itself — so
+   the printed list summed to 10 while the printed total said 12. Copying a
+   layer block's already-correct total number is NOT the same as copying
+   its criteria list; both must be copied, from the same block, together.
+   The same applies to PS2/PM6 (De Novo layer) and PP1 (Dominant-Inherited
+   layer) — any criterion a layer block adds on top of the base conclusion
+   must appear in this list whenever that layer's total is the one being
+   reported.
+
    Then, on its own line, after the criteria list above:
    **ACMG classification:** [classification] ([N] pts
    total — the layer's own "Total ACMG points" value).
@@ -272,10 +321,13 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
 
    Before finalizing this line, add up the point values of every criterion
    you listed (using the fixed values above, not values you wrote) and
-   confirm the sum equals [N] — if it does not, you have either included a
-   criterion that wasn't actually applied to this variant, used a wrong
-   point value, or mis-copied [N] itself; fix the criteria list to match
-   what is actually in the source layer block, not the other way around.
+   confirm the sum equals [N] — if it does not, check FIRST whether a
+   layer-added criterion (PM3 / PS2 / PM6 / PP1) is missing from your list
+   even though its points are already folded into [N] (the most common
+   cause); otherwise you have included a criterion that wasn't actually
+   applied to this variant, used a wrong point value, or mis-copied [N]
+   itself. Fix the criteria list to match what is actually in the source
+   layer block, not the other way around.
 
    [repeat the block above for each additional causative variant/layer]
 
@@ -322,3 +374,19 @@ during synthesis/reformatting, and do not introduce a citation that wasn't
 already attached to that claim in its source layer block. Ground every claim
 in this section in the layer blocks above (ACMG criteria, segregation,
 phase, citations) — do not introduce new evidence.
+
+ALLELIC-BALANCE CAVEATS ARE MANDATORY, NOT OPTIONAL, EITHER: the same rule
+applies to an allelic-balance artifact/mosaicism caveat written into a
+variant's own layer block Comment (e.g. "AB=0.09 is well below the expected
+~0.5 for a genuine het call... more consistent with a sequencing artifact or
+low-level mosaicism"). A real past failure: a variant was carried into
+section 2 as a causative Likely Pathogenic finding (PVS1+PP4, 9 pts) — the
+ACMG scoring itself was correct — but the caveat about anomalously low AB
+across the proband AND both parents, present verbatim in that variant's own
+Comment, was never restated in section 2's prose paragraph. The reader of the
+final report therefore saw a confident Likely Pathogenic call in section 2
+with no indication the underlying sequencing data looked more like an
+artifact than a true heterozygous variant. Summarizing a variant's ACMG
+evidence without also carrying forward its own layer block's call-quality
+caveat is an incomplete synthesis, not a stylistic omission — treat it with
+the same mandatory weight as a dropped citation.

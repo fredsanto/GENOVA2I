@@ -199,7 +199,30 @@ class ClinVarGeneStatsTool(NetworkTool):
     # tool's own cDNA-token esearch silently failed on the untruncated token).
     _CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;()]+")
 
+    # Matches ClinGenAlleleTool's own "ClinVar variation ID: 544398 (RCV: ...)"
+    # line — see the note on _resolve_variation_id below for why this is tried
+    # first, before this tool's own independent (weaker) HGVS-only esearch.
+    _CLINGEN_CLINVAR_ID_RE = re.compile(r"ClinVar variation ID:\s*(\d+)")
+
     def _resolve_variation_id(self, gene: str, hgvs: str) -> str | None:
+        """
+        Returns the resolved ClinVar variation ID, or None when the esearch
+        call itself SUCCEEDED but genuinely found no matching record (a real
+        negative). A failed/timed-out/rate-limited call raises ToolFetchError
+        instead of silently returning None — a real past failure: this used
+        to catch every exception here and return None indistinguishably from
+        a genuine "not found," so a transient NCBI failure (this pipeline
+        hammers NCBI across up to 32 concurrent workers per process, times
+        several concurrent server processes sharing one cluster egress IP —
+        see the NCBI_API_KEY/retry notes on _ncbi_get) surfaced in the report
+        as the confident-sounding "Not resolvable — no ClinVar record found
+        for this specific variant," even for a variant ClinVar actually has a
+        well-populated, conflicting-classification record for. Letting the
+        exception propagate lets the manifest's own retry:attempts/backoff
+        config (clinvar_gene_stats.yaml) actually apply, and on final failure
+        produces the standard "[FAILED — ToolFetchError]: ..." note instead
+        of a false negative.
+        """
         cdna_match = self._CDNA_CHANGE_RE.search(hgvs) if hgvs and hgvs != "NA" else None
         variant_term = cdna_match.group(0) if cdna_match else hgvs
         term = f"{gene}[gene] AND {variant_term}[variant name]" if variant_term and variant_term != "NA" else None
@@ -211,10 +234,11 @@ class ClinVarGeneStatsTool(NetworkTool):
                 {"db": "clinvar", "term": term, "retmode": "json", "retmax": 1},
                 self.timeout,
             ).json()
-            ids = data.get("esearchresult", {}).get("idlist", [])
         except Exception as e:
-            logger.debug("ClinVar variation-ID resolution failed for %s %s: %s", gene, hgvs, e)
-            return None
+            raise ToolFetchError(
+                f"ClinVar variation-ID lookup failed for {gene} {hgvs}: {e}"
+            ) from e
+        ids = data.get("esearchresult", {}).get("idlist", [])
         return ids[0] if ids else None
 
     def _fetch_classification_tally(self, variation_id: str) -> dict | None:
@@ -238,8 +262,12 @@ class ClinVarGeneStatsTool(NetworkTool):
             ).text
             root = ET.fromstring(xml)
         except Exception as e:
-            logger.debug("ClinVar submission fetch failed for variation %s: %s", variation_id, e)
-            return None
+            # Fetch/parse failure — NOT the same as a genuine empty record
+            # (see _resolve_variation_id's docstring for why this must not
+            # collapse to a silent None here either).
+            raise ToolFetchError(
+                f"ClinVar submission fetch failed for variation {variation_id}: {e}"
+            ) from e
 
         va = root.find(".//VariationArchive")
         cr = va.find("ClassifiedRecord") if va is not None else None
@@ -306,11 +334,52 @@ class ClinVarGeneStatsTool(NetworkTool):
             f"-> {verdict}"
         )
 
-        hgvs = context.field("HGVS")
-        variation_id = self._resolve_variation_id(gene, hgvs)
-        result = self._fetch_classification_tally(variation_id) if variation_id else None
+        # The variant-level tally is fetched best-effort: a fetch failure
+        # here (already retried internally by _ncbi_get — see its docstring)
+        # must not discard the gene-level counts computed above, but it also
+        # must not be reported the same way as a genuine "ClinVar has no
+        # record for this variant" — those are different signals to the LLM,
+        # and conflating them was the original bug (see _resolve_variation_id
+        # docstring). fetch_failed distinguishes the two in the output text.
+        #
+        # PREFER THE ALREADY-RESOLVED CLINGEN ID (mandatory check before
+        # falling back to this tool's own HGVS-only esearch): ClinGenAlleleTool
+        # runs at the same manifest order and resolves this variant via BOTH
+        # HGVS and genomic-coordinate fallback strategies (see clingen_allele.py),
+        # so it succeeds in cases this tool's own HGVS-only _resolve_variation_id
+        # cannot — most commonly when the canonical HGVS field is "NA" (the
+        # normalizer had no HGVS column to map for this upload) but ClinGen
+        # still resolved the variant from chrom/pos/ref/alt. A real past
+        # failure: RYR1 c.1250T>C (p.Leu417Pro) had HGVS="NA" in the variant
+        # dict; ClinGenAlleleTool's own raw output (available in
+        # context.all_outputs) already showed "ClinVar variation ID: 544398"
+        # resolved from genomic coordinates, but this tool's run() ignored
+        # that and went straight to its own HGVS-only resolution, which
+        # returned None immediately (no HGVS to build a query from — it
+        # never even called NCBI) and printed "Not resolvable — no ClinVar
+        # record found," even though ClinVar's record was sitting one tool
+        # output away. Always check for the ClinGen ID first.
+        clingen_raw = context.all_outputs.get("clingen_allele") or ""
+        clingen_match = self._CLINGEN_CLINVAR_ID_RE.search(clingen_raw)
+        preresolved_id = clingen_match.group(1) if clingen_match else None
 
-        if result is None:
+        hgvs = context.field("HGVS")
+        fetch_failed = False
+        try:
+            variation_id = preresolved_id or self._resolve_variation_id(gene, hgvs)
+            result = self._fetch_classification_tally(variation_id) if variation_id else None
+        except ToolFetchError as e:
+            logger.warning("ClinVar variant-level lookup failed for %s %s: %s", gene, hgvs, e)
+            variation_id, result, fetch_failed = None, None, True
+
+        if fetch_failed:
+            variant_block = (
+                "CLINVAR VARIANT-LEVEL SUBMISSION TALLY:\n"
+                "Fetch failed (NCBI request error after retries) — this variant's "
+                "ClinVar status is UNKNOWN, not confirmed absent. Do not treat this "
+                "as evidence the variant lacks a ClinVar record."
+            )
+        elif result is None:
             variant_block = (
                 "CLINVAR VARIANT-LEVEL SUBMISSION TALLY:\n"
                 "Not resolvable — no ClinVar record found for this specific variant "

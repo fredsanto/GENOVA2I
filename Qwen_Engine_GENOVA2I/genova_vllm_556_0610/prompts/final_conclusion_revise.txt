@@ -95,6 +95,16 @@ Specifically check for:
 - Any inheritance/segregation claim (de novo, maternal/paternal, carrier
   status) in the draft that conflicts with what that variant's own layer
   block states.
+- ALLELIC-BALANCE ARTIFACT/MOSAICISM CAVEAT CHECK (mandatory, do this for
+  every variant in section 2): re-read that variant's own layer/base block
+  Comment for any call-quality caveat about anomalously low or otherwise
+  inconsistent allelic balance (e.g. "AB=0.09 is well below the expected ~0.5
+  ... more consistent with a sequencing artifact or low-level mosaicism"). If
+  such a caveat exists in the source block but is absent from the draft's
+  section 2 paragraph for that variant, add it back verbatim in substance —
+  do not let a high ACMG classification (Likely Pathogenic/Pathogenic) stand
+  as an excuse to omit it; call quality and ACMG evidence strength are
+  independent axes and both must reach the reader.
 - Any other factual claim in the draft not traceable to the layer findings
   above.
 - EXCLUDED-VARIANT PHENOTYPE-MATCH CHECK (mandatory, do this for every gene

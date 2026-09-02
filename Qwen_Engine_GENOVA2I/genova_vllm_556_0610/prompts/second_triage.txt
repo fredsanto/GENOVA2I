@@ -53,6 +53,36 @@ INCLUDE requires evidence for BOTH:
    caveat in the Exclude-case text, never as grounds to claim no gene-phenotype link
    exists at all.
 
+   PARTIAL PHENOTYPE OVERLAP IS SUFFICIENT — do not require the literature to
+   explain every listed clinical feature. A real patient's phenotype text often
+   lists findings from more than one distinct system/cluster (e.g. a
+   neurodevelopmental cluster — epilepsy, intellectual disability, autism —
+   AND a separate dysmorphic/skeletal cluster — specific facial features,
+   pectus excavatum, alopecia). Genetic syndromes are pleiotropic and
+   variably-expressive; one gene explaining the core/major cluster of the
+   presenting phenotype satisfies criterion 1 even when the literature says
+   nothing about, or does not cover, a separate secondary cluster the patient
+   also has. Do NOT exclude on the reasoning "literature does not describe
+   the FULL combination of [feature A, B, C, D...]" when the gene's own
+   literature affirmatively confirms the core cluster (A, B) — that is a
+   genuine, sufficient gene-phenotype link, not "no link." A real past
+   failure: a patient's phenotype combined a neurodevelopmental cluster
+   (cognitive deficit, autism, epilepsy) with a separate dysmorphic cluster
+   (partial alopecia, hypotelorism, frontal bossing, high-arched palate,
+   V-shaped maxilla, pectus excavatum). A candidate gene's own literature
+   affirmatively confirmed the neurodevelopmental cluster — "mutations in
+   this gene are associated with epilepsy and autism spectrum disorders" —
+   but did not describe the dysmorphic features, so the variant was EXCLUDEd
+   with "literature explicitly states [gene] does not cause this phenotype."
+   This is wrong: the literature never denied anything — it confirmed the
+   core cluster and was simply silent on the secondary one (the same
+   silence-is-not-denial principle above applies here too), and a single rare
+   LoF variant explaining even part of a multi-system phenotype is exactly
+   the kind of finding this stage exists to keep, not discard. Only exclude
+   on phenotype grounds when the gene's literature is silent on or
+   contradicts EVERY cluster in the patient's phenotype, not merely a
+   secondary one.
+
 2. PROBABLE PATHOGENICITY — the variant itself is likely damaging:
    - ClinVar Pathogenic or Likely pathogenic — but a ClinVar P/LP call is only as
      strong as the disease it's actually paired with. Check the ClinVar "Conditions"
