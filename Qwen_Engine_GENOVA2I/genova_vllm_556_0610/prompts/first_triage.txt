@@ -20,6 +20,16 @@ Weight the retrieved evidence as follows:
 - VUS, missing, or conflicting evidence → keep.
 - Mechanistic, pathway, or functional relevance (no gene–disease link) → weak reason to keep.
 
+A real patient's phenotype often lists findings from more than one distinct
+cluster (e.g. a neurodevelopmental cluster — epilepsy, intellectual disability,
+autism — AND a separate cluster — an organ malformation, a cancer, a skeletal
+finding). "NO DISEASE LINK" / "gene unrelated to phenotype" only applies when the
+evidence affirmatively links this gene to NONE of the patient's clusters. If the
+evidence links the gene to AT LEAST ONE distinct cluster, that is a reason to KEEP
+— even if the evidence is silent on the patient's other cluster(s). Being silent
+on a different cluster is not the same as ruling the gene out; only discard on
+phenotype grounds when the mismatch is across every cluster, not just one.
+
 Output exactly three lines and nothing else:
 Keep-case: <strongest reason to KEEP — must be a positive or uncertain argument, ≤15 words>
 Discard-case: <strongest reason to DISCARD — must be a contrary or disqualifying argument, ≤15 words>

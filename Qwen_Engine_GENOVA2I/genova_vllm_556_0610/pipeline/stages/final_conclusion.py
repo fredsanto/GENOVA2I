@@ -26,6 +26,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pipeline.core.acmg_points import recompute_and_fix_totals
+
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
 
@@ -170,7 +172,7 @@ def run(
         )
     except Exception as exc:
         logger.warning("[FinalConclusion] Revise pass failed (%s) — using unrevised draft.", exc)
-        return draft
+        return recompute_and_fix_totals(draft)
 
     if not _is_well_formed(revised):
         if _is_well_formed(draft):
@@ -178,11 +180,19 @@ def run(
                 "[FinalConclusion] Revise pass produced malformed/truncated output "
                 "(missing a numbered section) — using unrevised draft."
             )
-            return draft
+            return recompute_and_fix_totals(draft)
         logger.warning(
             "[FinalConclusion] Both draft and revise passes are malformed/truncated "
             "(missing a numbered section) — using whichever is longer."
         )
-        return revised if len(revised) >= len(draft) else draft
+        return recompute_and_fix_totals(revised if len(revised) >= len(draft) else draft)
 
-    return revised
+    # Re-sum every "**ACMG classification:** Label (N pts total)" line here
+    # against its own immediately-preceding criteria bullets before handing
+    # the report to the user — this is the block the user actually reads,
+    # and a wrong total surviving every upstream stage's own check (or a
+    # criterion the synthesis itself dropped/added while copying) is still
+    # visible here even if it wasn't visible earlier. See
+    # acmg_points.recompute_and_fix_totals for the recurring failure this
+    # guards against.
+    return recompute_and_fix_totals(revised)

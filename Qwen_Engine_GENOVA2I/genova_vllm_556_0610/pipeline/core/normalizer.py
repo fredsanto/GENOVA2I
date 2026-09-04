@@ -411,7 +411,18 @@ _FIELD_DESCRIPTIONS = {
     "Var_seq":             "alternate/variant allele",
     "Type":                "variant type/consequence, e.g. missense, nonsense, frameshift, synonymous, splicing",
     "Transcript":          "RefSeq transcript/accession ID, e.g. \"NM_000303.3\", ONLY when given as its own column separate from the HGVS notation",
-    "HGVS":                "cDNA and/or protein change notation, e.g. \"c.710C>T p.(Thr237Met)\" (may include a transcript prefix)",
+    "HGVS":                "cDNA and/or protein change notation, e.g. \"c.710C>T p.(Thr237Met)\" (may include a transcript prefix). "
+                           "Match this by the VALUE'S SHAPE, not the column name — a column with a generic/unrelated-"
+                           "sounding name (e.g. \"variant_info\", \"annotation\", \"details\") still counts as HGVS if its "
+                           "sample value contains a \"c.\" and/or \"p.\" change token, even bundled inside a longer "
+                           "compound annotation across multiple transcripts, e.g. "
+                           "\"GENE:MANE_Select-NM_000540.3:exon13:c.1250T>C:p.Leu417Pro,GENE:NM_001042723.2:exon13:"
+                           "c.1250T>C:p.Leu417Pro\" is HGVS (map the whole cell — downstream parsers pull the c./p. "
+                           "tokens back out of it). A real past failure: a column literally named \"variant_info\" "
+                           "with exactly this shape was left unmapped in every run because its column name gave no "
+                           "hint and the description above only showed a already-clean example — AutoPVS1 and other "
+                           "tools then skipped that variant entirely for \"hgvs=NA\" even though the c./p. change was "
+                           "sitting right there in an unmapped column.",
     "Zygosity":            "heterozygous/homozygous/hemizygous genotype call",
     "Gene":                "gene symbol",
     "OMIM_phenotype":      "disease/phenotype name associated with the gene/variant",
@@ -551,17 +562,27 @@ def _map_columns_llm(df: pd.DataFrame, llm) -> tuple[pd.DataFrame, str]:
     }
 
     llm_cols: list[str] = []
+    exact_matches: list[tuple[str, str]] = []
     for col in df.columns:
         exact_field = _target_by_lower.get(col.strip().lower())
         if exact_field and exact_field not in claimed:
             if col != exact_field:
                 mapping[col] = exact_field
             claimed.add(exact_field)
+            exact_matches.append((col, exact_field))
             continue
         llm_cols.append(col)
 
     # ── SLM pass: everything else ─────────────────────────────────────────────
     summary_lines = ["Column header interpretation (SLM-driven):"]
+
+    # Exact-header-name matches never reach the SLM pass below (claimed here,
+    # deterministically) — log them too, or a column named e.g. "Frequency"
+    # verbatim is silently correct but looks IDENTICAL in this log to a
+    # genuinely-missing column, since neither appears in the SLM-mapped list
+    # that follows. Distinguish it explicitly instead of leaving it invisible.
+    for col, exact_field in exact_matches:
+        summary_lines.append(f"  {col!r:<30} -> {exact_field} (exact header match)")
 
     if llm_cols:
         sample_row = {}

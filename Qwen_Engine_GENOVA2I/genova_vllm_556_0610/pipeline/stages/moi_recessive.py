@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference, append_clinvar_references
-from pipeline.core.acmg_points import relabel_all_points_lines
+from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -217,6 +217,10 @@ def run_pair(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_RECESSIVE,
     )
+    # Re-sum each variant's copied-verbatim base criteria against its own
+    # "Base ACMG points" line before relabeling — catches a base conclusion
+    # that already stated a wrong total (see acmg_points.recompute_and_fix_totals).
+    result = recompute_and_fix_totals(result)
     result = relabel_all_points_lines(result)
     full_context = variant_a_context + "\n" + variant_b_context + "\n" + variant_a_base_conclusion + "\n" + variant_b_base_conclusion
     result = validate_citations(result, full_context)
@@ -281,6 +285,10 @@ def run_solo(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_RECESSIVE_SOLO,
     )
+    # Re-sum each variant's copied-verbatim base criteria against its own
+    # "Base ACMG points" line before relabeling — catches a base conclusion
+    # that already stated a wrong total (see acmg_points.recompute_and_fix_totals).
+    result = recompute_and_fix_totals(result)
     result = relabel_all_points_lines(result)
     full_context = variant_context + "\n" + variant_base_conclusion
     result = validate_citations(result, full_context)

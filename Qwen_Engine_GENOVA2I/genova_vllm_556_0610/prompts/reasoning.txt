@@ -12,10 +12,77 @@ claim, explicitly state what is missing rather than inferring from prior knowled
 
 Reasoning steps:
 
-1. Phenotype fit: Identify any gene–disease related assertions present in the provided 
-   evidence and assess their consistency with the patient's clinical features. Quote or cite 
-   the relevant context passage (e.g. "LitVar2 reports [PMID:XXXXX]…", "AutoPVS1 output states…"). 
+1. Phenotype fit: Identify any gene–disease related assertions present in the provided
+   evidence and assess their consistency with the patient's clinical features. Quote or cite
+   the relevant context passage (e.g. "LitVar2 reports [PMID:XXXXX]…", "AutoPVS1 output states…").
    Do NOT assert gene–disease links that are not explicitly present in the provided evidence.
+
+   A real patient's phenotype text often lists findings from more than one distinct
+   system/cluster (e.g. a neurodevelopmental cluster — epilepsy, intellectual
+   disability, autism — AND a separate cluster — an organ malformation, a cancer, a
+   dysmorphic feature). Before writing your prose assessment, output ONE labeled
+   verdict line, in exactly this form:
+
+     PHENOTYPE CLUSTER MATCH: YES | PARTIAL | NO
+
+   This is the single most important line in this entire step — a later pipeline
+   stage extracts it verbatim and treats it as final, so get it right and do not
+   hedge, qualify, or omit it. Definitions:
+     YES     — the evidence affirmatively links this gene to the patient's phenotype
+               essentially as a whole (no separate cluster is left unaddressed).
+     PARTIAL — the evidence affirmatively links this gene to AT LEAST ONE distinct
+               cluster/feature of the patient's phenotype, but is silent on at
+               least one other cluster the patient also has. This is a POSITIVE,
+               sufficient gene-phenotype link for that matched cluster — it is
+               NOT a weaker or borderline case of NO, and downstream stages must
+               treat it the same as YES for inclusion purposes. Genetic syndromes
+               are pleiotropic and variably-expressive; the literature not
+               mentioning every finding in a multi-system phenotype is normal and
+               expected, not a red flag.
+     NO      — the evidence names no condition/category that overlaps ANY part of
+               the patient's phenotype, OR it explicitly, affirmatively states the
+               gene does NOT cause the patient's phenotype.
+   PARTIAL is the common, correct answer for a broad or multi-system phenotype and
+   a gene with real but incomplete literature support — do not default to NO just
+   because coverage isn't full. A citation naming a broad category (e.g.
+   "epilepsy," "autism spectrum disorder," "intellectual disability,"
+   "cardiomyopathy") that the patient's phenotype text also contains — even in
+   different words, even if the citation is silent on every other finding in the
+   patient's list, even if the citation itself says it doesn't cover the patient's
+   other features — is PARTIAL (or YES if it's genuinely the patient's whole
+   picture), never NO. The citation not mentioning a symptom is evidence about
+   that symptom only — it is NOT evidence against the symptom(s) the citation DOES
+   name.
+
+   WORKED EXAMPLE (apply this reasoning pattern):
+     Patient phenotype: "cognitive deficit, fine motor impairment, autism spectrum
+     disorder, epilepsy since age 2.5-3, partial alopecia, hypotelorism, frontal
+     bossing, high palate, V-shaped maxilla, facial hypotonia, pectus excavatum."
+     Evidence: "Mutations in the three synapsin genes [including this gene] lead to
+     profound social deficits and cortical dysfunctions... associated with epilepsy
+     and autism spectrum disorders" but does not mention the craniofacial or
+     skeletal features.
+     WRONG: "PHENOTYPE CLUSTER MATCH: NO — the evidence does not cover the
+     craniofacial features, specific motor deficits, or age of onset, so there is
+     no gene-phenotype link." (Treats partial coverage as no match — forbidden.)
+     RIGHT: "PHENOTYPE CLUSTER MATCH: PARTIAL — the evidence affirmatively links
+     this gene to epilepsy and autism spectrum disorder, both present in this
+     patient (epilepsy since 2.5-3y, ASD). The evidence is silent on the
+     craniofacial/skeletal cluster (alopecia, hypotelorism, frontal bossing,
+     V-shaped maxilla, pectus excavatum); silence does not contradict them."
+   A genuine "PHENOTYPE CLUSTER MATCH: NO" looks like this instead: gene is
+   evidenced only for an isolated cardiac arrhythmia with no neurodevelopmental,
+   dysmorphic, or skeletal association anywhere in the literature, and the
+   patient's phenotype is pure neurodevelopmental/dysmorphic with no cardiac
+   finding at all — zero overlap on any named category, not merely incomplete
+   detail on a category that does overlap.
+
+   After the verdict line, write your prose Phenotype Fit assessment. If the
+   verdict is YES or PARTIAL, state plainly that the gene explains the matched
+   cluster and that the evidence is silent on — not contradicting — any remaining
+   cluster. Do NOT write "gap," "mismatch," "not supported," or similar language
+   as the conclusion when the verdict is YES or PARTIAL — reserve that language
+   for a genuine NO verdict.
 
 2. Variant description: Explain each component of the variant notation (chromosome,
    position, nucleotide change, HGVS consequence, zygosity).

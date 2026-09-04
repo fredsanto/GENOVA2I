@@ -882,6 +882,56 @@ class Pipeline:
                     continue
                 reasoning_only[i] = r
 
+        # Backend-extracted PHENOTYPE CLUSTER MATCH verdict (YES/PARTIAL/NO/UNKNOWN),
+        # parsed once from each variant's own Stage 1 reasoning output. Computed here
+        # (not re-derived by second_triage/conclusion) for the same reason phase and
+        # gene inheritance mode are backend-determined facts: a judgment made once and
+        # restated verbatim is followed far more reliably than the same judgment left
+        # buried in prose and re-derived by each downstream stage on its own — which
+        # in practice produced inconsistent verdicts call to call for the same variant.
+        cluster_match_cache: dict[int, str] = {
+            i: reasoning.parse_cluster_match(reasoning_only[i])
+            for i in kept_indices if i not in reasoning_failed
+        }
+
+        _CLUSTER_MATCH_LABELS = {
+            "YES": (
+                "YES — Stage 1 reasoning affirmatively linked this gene to the "
+                "patient's phenotype essentially as a whole."
+            ),
+            "PARTIAL": (
+                "PARTIAL — Stage 1 reasoning affirmatively linked this gene to AT "
+                "LEAST ONE distinct cluster of the patient's phenotype; it is "
+                "silent on (not contradicting) at least one other cluster. This is "
+                "a POSITIVE, sufficient gene-phenotype link — treat it the same as "
+                "YES for inclusion/PVS1/Phenotype-fit purposes. Do NOT write 'no "
+                "gene-phenotype link', 'mismatch', or similar language for this "
+                "variant on phenotype grounds."
+            ),
+            "NO": (
+                "NO — Stage 1 reasoning found no cluster of the patient's "
+                "phenotype that this gene's evidence overlaps."
+            ),
+            "UNKNOWN": (
+                "UNKNOWN — Stage 1 reasoning did not produce a clear verdict; judge "
+                "phenotype fit from the reasoning narrative below as a fallback."
+            ),
+        }
+
+        def _cluster_match_block(i: int) -> str:
+            """Backend-extracted Stage 1 phenotype-cluster verdict for variant i,
+            handed to second_triage and conclusion as a stated, closed fact —
+            same pattern as _inheritance_mode_block/_phase_fact — instead of
+            letting those stages re-read and re-judge the phenotype-fit
+            narrative themselves each time."""
+            verdict = cluster_match_cache.get(i, "UNKNOWN")
+            label = _CLUSTER_MATCH_LABELS[verdict]
+            return (
+                "\n--- PHENOTYPE CLUSTER MATCH (backend-extracted from Stage 1 "
+                "reasoning — authoritative, do not re-derive) ---\n"
+                f"{label}\n"
+            )
+
         def _sibling_block(i: int) -> str:
             """Sibling block built from sibling reasoning text (Call 2 — post Call 1).
             Same confirmed-hom-only gate as _sibling_evidence_block."""
@@ -922,7 +972,7 @@ class Pipeline:
             sib_block = _sibling_block(i)
             combined = reasoning.run_second_triage(
                 variant_context=context_slices[i],
-                reasoning_text=reasoning_only[i] + _zygosity_note_block(i),
+                reasoning_text=reasoning_only[i] + _zygosity_note_block(i) + _cluster_match_block(i),
                 llm=self._llm,
                 sibling_context_block=sib_block,
             )
@@ -1048,9 +1098,12 @@ class Pipeline:
         def _conclude_one(i: int) -> tuple[int, str]:
             gene = variants[i].get("Gene", "NA")
             ca   = cross_analyses.get(gene) if gene != "NA" else None
-            # Pertinence appended to the reasoning text (not a new run_one()
-            # param) — see _pertinence_block's docstring for why.
-            reasoning_with_pertinence = reasonings[i] + _pertinence_block(i) + _zygosity_note_block(i)
+            # Pertinence and cluster-match appended to the reasoning text (not
+            # a new run_one() param) — see _pertinence_block's docstring for why.
+            reasoning_with_pertinence = (
+                reasonings[i] + _pertinence_block(i) + _zygosity_note_block(i)
+                + _cluster_match_block(i)
+            )
             return i, conclusion.run_one(
                 variant_context=context_slices[i],
                 reasoning=reasoning_with_pertinence,

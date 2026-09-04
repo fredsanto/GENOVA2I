@@ -43,6 +43,29 @@ MAX_NEW_TOKENS_SCORING   = 200
 _INCLUDE_CASE_RE = re.compile(r"Include-case:\s*(.+)", re.IGNORECASE)
 _EXCLUDE_CASE_RE = re.compile(r"Exclude-case:\s*(.+)", re.IGNORECASE)
 _DECISION_RE     = re.compile(r"Decision:\s*(INCLUDE|EXCLUDE)", re.IGNORECASE)
+_CLUSTER_MATCH_RE = re.compile(
+    r"PHENOTYPE CLUSTER MATCH:\s*(YES|PARTIAL|NO)", re.IGNORECASE
+)
+
+
+def parse_cluster_match(reasoning_text: str) -> str:
+    """
+    Extract Stage 1's own "PHENOTYPE CLUSTER MATCH: YES|PARTIAL|NO" verdict from
+    its Phenotype fit step (see prompts/reasoning.txt).
+
+    This exists so the verdict can be re-stated to downstream stages
+    (second_triage, conclusion) as a small labeled backend-determined fact —
+    same pattern as _inheritance_mode_block/_phase_fact in pipeline.py — instead
+    of leaving those stages to re-read and possibly reinterpret the full
+    reasoning narrative themselves. A single computed-once verdict, restated
+    verbatim, is far more reliably followed than the same judgment buried in
+    several paragraphs of prose and asked to be located again each time.
+
+    Returns "YES", "PARTIAL", "NO", or "UNKNOWN" if the line is missing
+    (e.g. the model dropped the label — treat as unknown, not as NO).
+    """
+    m = _CLUSTER_MATCH_RE.search(reasoning_text)
+    return m.group(1).upper() if m else "UNKNOWN"
 
 
 # ── Prompt loaders ────────────────────────────────────────────────────────────

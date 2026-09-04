@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference
-from pipeline.core.acmg_points import relabel_all_points_lines
+from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -85,6 +85,7 @@ def run_one(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_DENOVO,
     )
+    result = recompute_and_fix_totals(result)
     result = relabel_all_points_lines(result)
     full_context = variant_context + "\n" + base_conclusion
     result = validate_citations(result, full_context)

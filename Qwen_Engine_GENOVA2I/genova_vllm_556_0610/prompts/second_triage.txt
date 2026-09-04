@@ -18,6 +18,37 @@ INCLUDE requires evidence for BOTH:
 
 1. GENE-PHENOTYPE LINK — the gene is known or strongly suspected to cause the
    patient's phenotype:
+
+   MANDATORY FIRST CHECK — the CLINICAL REASONING above contains a block
+   titled "--- PHENOTYPE CLUSTER MATCH (backend-extracted from Stage 1
+   reasoning — authoritative, do not re-derive) ---". This is a computed fact,
+   not a narrative opinion — find this exact block FIRST, before reading
+   anything else in this section, and apply it mechanically. Do not go
+   looking for a "CLUSTER MATCH:"/"COVERAGE:" line elsewhere in the prose
+   reasoning — the labeled block is the only place this verdict is decided:
+     - Block says YES or PARTIAL -> criterion 1 is CLOSED. Satisfied. Not up
+       for re-evaluation. Do not re-read the phenotype fit narrative, the
+       craniofacial/dysmorphic/secondary-cluster details, or anything else in
+       the CLINICAL REASONING above to second-guess this — Stage 1 already
+       made this determination and it is not this stage's job to redo it.
+       Skip straight to criterion 2 (PROBABLE PATHOGENICITY) below; that is
+       the ONLY remaining question for this variant.
+       Your Exclude-case line MUST NOT contain phenotype-linkage language at
+       all in this case — no "no gene-phenotype link," "not linked to,"
+       "does not explain," "unrelated gene," "phenotype mismatch," or any
+       paraphrase of these. If you catch yourself writing any such phrase
+       after seeing a YES/PARTIAL block, delete it — Exclude-case may only
+       cite criterion-2 (pathogenicity) grounds in that case, or a truly
+       independent, separate track of evidence you can name and quote. A
+       PARTIAL verdict is not itself such grounds — it is criterion 1's own
+       output, already closed above, not a new fact for this stage to weigh.
+     - Block says NO -> criterion 1 is NOT satisfied on phenotype grounds;
+       proceed to EXCLUDE unless a different track of evidence (e.g. a
+       separate LitVar2 variant-level hit) independently supplies a match
+       Stage 1 missed.
+     - Block says UNKNOWN, or the block is entirely absent (older-format
+       input) -> fall back to judging criterion 1 directly from the
+       sub-points below.
    - Gene reported in literature or OMIM for this phenotype or a phenotypically
      overlapping condition, OR
    - ClinVar entries for this gene list the patient's disease as associated condition.
@@ -203,6 +234,22 @@ INSUFFICIENT" EXCLUDE RULE BELOW:
      simply "NA"/absent. Missing zygosity is a data gap (note it as a
      caveat), not proof of heterozygosity, and is not by itself grounds to
      invoke this rule either.
+   - CONFIRMED DE NOVO ALSO BYPASSES THIS RULE — including for X-linked genes.
+     If ALLELIC BALANCE data shows the variant absent in both parents (or one
+     parent untested), a heterozygous call on an X-linked gene must NOT be
+     EXCLUDEd with reasoning like "single heterozygous call in an X-linked
+     gene; insufficient for hemizygous disease." De novo status is itself the
+     strong pathogenicity/causation signal (see PS2/PM6 above) — it does not
+     additionally require the zygosity to read as hemizygous, and "hemizygous"
+     is a male-only genotype label that does not apply at all to a female
+     proband, whose true, fully causative genotype for an X-linked de novo
+     event IS heterozygous. Do not infer proband sex backwards from the gene
+     being X-linked (e.g. "must be male because the gene is X-linked") — sex
+     is not established by the zygosity read alone, and several X-linked
+     genes (PDHA1 among them) are well documented to cause disease in
+     heterozygous females. Never EXCLUDE a confirmed-de-novo variant on
+     hemizygous/zygosity-mismatch grounds; evaluate it under the DE NOVO
+     pathogenicity signal instead.
 
 EXCLUDE if:
    - Gene-phenotype link is absent or only speculative (no literature, no OMIM
@@ -221,6 +268,25 @@ EXCLUDE if:
      PARENT above), so evaluate it as a potential dominant finding rather than
      excluding it on recessive grounds just because the gene has also been
      reported as AR somewhere, OR
+
+     X-LINKED GENES SPECIFICALLY — this EXCLUDE rule may ONLY be invoked for
+     an X-linked gene when its mode is CONFIRMED XLR with no XLD component
+     reported anywhere in the evidence. If the "Gene inheritance mode" field
+     is XLD, XLD_XLR (dual), or unresolved/unknown/NA (no explicit mode
+     stated) — which is the common case, since most input data does not carry
+     a confirmed inheritance-mode call — do NOT exclude a heterozygous
+     X-linked variant with reasoning like "single het in X-linked gene; no
+     dominant inheritance or de novo status" or "insufficient for hemizygous
+     disease." A downstream specialized module (X-LINKED MOI ANALYSIS) exists
+     specifically to weigh XLD-vs-XLR, female heterozygous causation, and
+     parental cosegregation for X-linked variants — it never runs on a variant
+     this stage has already EXCLUDEd. Pre-empting it here with an uncertain-
+     mode gene throws away a case that module is built to resolve. Treat mode
+     unresolved/unknown the same as AD_AR/XLD_XLR dual-mode above: it does NOT
+     satisfy this EXCLUDE rule's "ONLY reported mode is recessive" condition,
+     so this rule cannot fire — let the variant through to that module unless
+     a different, independent EXCLUDE ground (criterion 1, or a genuinely
+     benign/common variant under criterion 2) applies on its own, OR
    - Proband allelic balance ≤ 0.2 with no other strong independent evidence
      (ClinVar Pathogenic/Likely pathogenic, confirmed second hit) — treat as an
      unconfirmed/low-confidence call, not sufficient grounds for INCLUDE. This
