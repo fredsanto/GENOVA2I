@@ -77,6 +77,7 @@ variant-pipeline/
 │   │   ├── gnomad_constraint.py     ← gnomAD gene constraint (pLI, LOEUF) — gene-scoped, class-cached
 │   │   ├── clinvar_gene_stats.py    ← ClinVar gene-level P/LP missense vs. nonsense/frameshift counts
 │   │   ├── clingen_allele.py        ← ClinGen Allele Registry variant resolution (CAid, cross-refs)
+│   │   ├── genereviews.py           ← GeneReviews clinical-description fetch (NCBI Bookshelf) — gene-scoped, class-cached
 │   │   ├── websearch.py             ← WebSearchTool + WebFetchTool (sub-tools for ReAct agent)
 │   │   ├── websearch_agent.py       ← WebSearchAgentTool: full ReAct web-search loop
 │   │   └── ncbi.py                  ← NCBIFetchTool (sub-tool for ReAct agent)
@@ -88,6 +89,7 @@ variant-pipeline/
 │       ├── gnomad_constraint.yaml
 │       ├── clinvar_gene_stats.yaml
 │       ├── clingen_allele.yaml
+│       ├── genereviews.yaml
 │       └── websearch_agent.yaml
 │
 └── prompts/
@@ -405,6 +407,7 @@ note the missing evidence in the report rather than reasoning from a gap.
 | `gnomad_constraint` | `NetworkTool` | 1 (parallel) | Gene present (manifest gate) |
 | `clinvar_gene_stats` | `NetworkTool` | 1 (parallel) | Gene present (manifest gate) |
 | `clingen_allele` | `NetworkTool` | 1 (parallel) | Python gate — a usable query can be built (transcript+cDNA, clean HGVS, or genomic SNV coordinates) |
+| `genereviews` | `NetworkTool` | 1 (parallel) | Gene present (manifest gate) |
 | `autopvs1` | `NetworkTool` | 2 (parallel) | Python gate — LoF/frameshift/splice variants only |
 | `websearch_agent` | `ReActTool` | 3 (serial) | No gate — always runs; the ReAct agent's own pre-loop checkpoint (sees prior tool outputs + full variant record, including ClinVar_class/Frequency) decides whether search is needed |
 
@@ -459,14 +462,34 @@ clean failure. An allele with zero cross-references in any indexed database is
 itself a meaningful signal (novel/unreported variant), surfaced explicitly rather
 than as a blank result.
 
+**`genereviews`** fetches the gene's canonical GeneReviews chapter(s) directly from
+NCBI Bookshelf (`esearch` gene symbol → gene ID, `elink` gene→books, `esummary` to
+resolve chapter accessions, then a plain page fetch + `Clinical Description` /
+`Clinical Characteristics` / `Suggestive Findings` section extraction) and returns
+that curated phenotype text verbatim. Gene-scoped, class-cached like
+`gnomad_constraint`. Exists because `litvar2_summary`'s Track 1 sorts by `pub_date`
+to surface newly-characterized gene-disease links (see its own note above) — for a
+gene with a large, unrelated publication volume (e.g. a common cancer gene that also
+causes a rare syndrome) that can bury the syndrome's own defining phenotype
+description outside the `max_pmids`-capped pool entirely, and the reasoning stage
+then correctly summarizes an incomplete pool as "no phenotype link" from evidence
+that never actually contained the relevant paper. Concrete case that motivated this
+tool: SMAD4/Myhre syndrome — LitVar2's pool surfaced a narrow 2026 hepatic
+case report and concluded no neurological association, while GeneReviews' own Myhre
+Syndrome chapter explicitly lists "developmental delay/intellectual disability" and
+"epilepsy" as part of the syndrome. A gene with no GeneReviews entry returns an
+explicit "no chapter found" message rather than `None`, consistent with the
+"errors are informative, not silent" rule.
+
 **`websearch_agent`** runs a ReAct loop with three sub-tools (WebSearchTool,
 WebFetchTool, NCBIFetchTool). No gate — always runs. Before starting the loop, a
 pre-loop checkpoint prompt receives all pre-fetched evidence from earlier tools
-(LitVar2, AutoPVS1, SpliceAI, gnomAD constraint, ClinVar gene stats, ClinGen allele)
-plus the full variant record (including `ClinVar_class`/`Frequency`) and decides
-whether any primary gaps remain (OMIM/GeneReviews, ClinVar details, functional data,
-recent case reports) or whether the variant needs search at all — this replaced an
-earlier Python `gate()` that hard-skipped ClinVar benign/likely-benign and common
+(LitVar2, AutoPVS1, SpliceAI, gnomAD constraint, ClinVar gene stats, ClinGen allele,
+GeneReviews) plus the full variant record (including `ClinVar_class`/`Frequency`)
+and decides whether any primary gaps remain (OMIM, ClinVar details, functional data,
+recent case reports — GeneReviews itself is now pre-fetched, so the agent should not
+need to re-search for it) or whether the variant needs search at all — this replaced
+an earlier Python `gate()` that hard-skipped ClinVar benign/likely-benign and common
 (AF > 1%) variants before the checkpoint ever ran; that decision now lives entirely
 in the checkpoint's own judgment, which has full visibility into those same fields.
 The loop runs up to `max_steps=4` iterations; after each observation a mid-loop

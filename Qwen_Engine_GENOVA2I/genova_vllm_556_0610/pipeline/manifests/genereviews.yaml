@@ -1,0 +1,15 @@
+name: genereviews
+description: "Fetches the canonical GeneReviews clinical-description section(s) for this gene from NCBI Bookshelf, independent of PubMed search ranking."
+enabled: true
+
+order: 1
+parallel: true
+
+gate:
+  field: Gene
+  operator: not_na
+
+timeout: 15
+retry:
+  attempts: 2
+  backoff: 2.0

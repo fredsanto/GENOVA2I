@@ -51,7 +51,7 @@ from pipeline.llm.registry   import get_client
 from pipeline.tools          import (
     AutoPVS1Tool, LitVar2SummaryTool, SpliceAITool, WebSearchAgentTool,
     GnomadConstraintTool, GnomadFrequencyTool, ClinVarGeneStatsTool,
-    ClinVarResidueSearchTool, ClinGenAlleleTool,
+    ClinVarResidueSearchTool, ClinGenAlleleTool, GeneReviewsTool,
 )
 from pipeline.tools.clinvar_gene_stats import classify_consequence_counts
 from pipeline.tools.gnomad_constraint  import (
@@ -461,6 +461,7 @@ class Pipeline:
             ClinVarGeneStatsTool(),
             ClinVarResidueSearchTool(),
             ClinGenAlleleTool(),
+            GeneReviewsTool(),
         ]
 
         # ── Executor ──────────────────────────────────────────────────────────

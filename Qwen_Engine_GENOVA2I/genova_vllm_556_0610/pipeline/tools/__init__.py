@@ -8,6 +8,7 @@ from pipeline.tools.gnomad_frequency import GnomadFrequencyTool
 from pipeline.tools.clinvar_gene_stats import ClinVarGeneStatsTool
 from pipeline.tools.clinvar_residue_search import ClinVarResidueSearchTool
 from pipeline.tools.clingen_allele import ClinGenAlleleTool
+from pipeline.tools.genereviews import GeneReviewsTool
 
 __all__ = [
     "AutoPVS1Tool",
@@ -19,4 +20,5 @@ __all__ = [
     "ClinVarGeneStatsTool",
     "ClinVarResidueSearchTool",
     "ClinGenAlleleTool",
+    "GeneReviewsTool",
 ]
