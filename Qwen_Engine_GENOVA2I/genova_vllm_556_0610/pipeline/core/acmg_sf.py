@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from pipeline.core.clinvar_reference import resolve_variant_clinvar_status
+
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
 
@@ -133,6 +135,47 @@ def is_pathogenic_clinvar(value: str | None) -> bool:
     return "pathogenic" in v
 
 
+def _slm_check_clingen_pathogenic(gene: str, hgvs: str, clingen_text: str, llm: "LLMClient") -> bool:
+    """
+    Cheap fallback SLM call, parallel to _slm_check_litvar2_pathogenic above,
+    for the ClinGen Allele Registry cross-reference fetched by
+    tools/clingen_allele.py — used when ClinVar_class is NA/missing AND the
+    litvar2 fallback above didn't already flag the variant.
+
+    IMPORTANT ASYMMETRY vs. the litvar2 check: clingen_allele's own output
+    (see its run() method) never states a clinical significance at all — it
+    only reports a CAid, and, if present, a bare "ClinVar variation ID: N
+    (RCV: ...)" cross-reference line. That line proves a ClinVar record
+    EXISTS for this exact variant; it says nothing about whether that record
+    is Pathogenic or Benign. The prompt below is written to fail closed on
+    that ambiguity — it must answer NO whenever the text stops at an ID/RCV
+    with no significance wording, and must not treat "has a ClinVar entry"
+    as a proxy for "is a P/LP entry".
+    """
+    system = (
+        "You are a clinical genetics literature screener. "
+        "Answer with exactly one word: YES or NO."
+    )
+    user = (
+        f"Gene: {gene}\n"
+        f"Variant under review: {hgvs}\n\n"
+        f"ClinGen Allele Registry cross-reference:\n{clingen_text[:3000]}\n\n"
+        "Does this text EXPLICITLY state that this variant's ClinVar record "
+        "has a clinical significance of Pathogenic or Likely pathogenic? "
+        "A bare 'ClinVar variation ID' or 'RCV' cross-reference with no "
+        "stated clinical significance does NOT count — that only proves a "
+        "ClinVar record exists, not what it says. Answer YES only if a "
+        "significance of Pathogenic/Likely pathogenic is stated in the text "
+        "itself. Answer YES or NO."
+    )
+    try:
+        raw = llm.generate(system=system, user=user, max_tokens=5, temperature=0.0).strip().upper()
+    except Exception as exc:
+        logger.warning("[ACMG-SF] clingen P/LP fallback check failed for gene %s: %s", gene, exc)
+        return False
+    return raw.startswith("Y")
+
+
 def _slm_check_litvar2_pathogenic(gene: str, hgvs: str, litvar2_text: str, llm: "LLMClient") -> bool:
     """
     Cheap fallback SLM call used only when ClinVar_class is unavailable/NA for a
@@ -178,11 +221,33 @@ def build_actionable_set(
     variants: list[dict],
     litvar2_raw_by_variant: dict[int, str | None],
     llm: "LLMClient",
+    clingen_raw_by_variant: dict[int, str | None] | None = None,
+    clinvar_tally_raw_by_variant: dict[int, str | None] | None = None,
 ) -> tuple[set[int], dict[int, str]]:
     """
     Identify variants that are ACMG SF actionable findings: gene is in the
-    ACMG SF v3.2 list AND the variant is P/LP (ClinVar_class field primary,
-    litvar2 evidence as fallback when ClinVar_class is NA/missing).
+    ACMG SF v3.2 list AND the variant is P/LP, checked in this order:
+      1. ClinVar_class field on the variant dict (primary — but this is an
+         SLM-mapped column from the input CSV and can be missing or mapped
+         from the wrong raw column; see the BRCA1 case below).
+      2. ClinVarGeneStatsTool's own already-fetched, deterministic
+         per-submission ClinVar tally (resolve_variant_clinvar_status,
+         pipeline.core.clinvar_reference) — real ClinVar data straight from
+         NCBI, entirely independent of the input CSV's own columns. A real
+         observed failure this fixes: a CSV's actual ClinVar-classification
+         column had a dated, non-standard header
+         ("ClinVar.20230813..Stars..Conflict_details.") that the SLM header
+         interpreter left unmapped while mapping an unrelated empty column
+         to ClinVar_class instead — silently losing a 46/46-submitter
+         Pathogenic BRCA1 call that ClinVarGeneStatsTool had already fetched
+         correctly and was sitting unused in the pipeline's own evidence.
+      3. litvar2 literature evidence (SLM judgment call) when 1 and 2 both
+         come back unresolved/NA.
+      4. clingen_allele's ClinVar cross-reference (SLM judgment call) as a
+         last resort — see _slm_check_clingen_pathogenic's docstring for why
+         this fires only rarely: clingen_allele's own output proves a
+         ClinVar record exists, not its significance, so the check fails
+         closed rather than false-positiving on a bare variation ID.
 
     Returns (actionable_indices, reasons) where reasons[i] is a short string
     describing why variant i was flagged, for use in triage-exemption
@@ -190,6 +255,8 @@ def build_actionable_set(
     """
     actionable_indices: set[int] = set()
     reasons: dict[int, str] = {}
+    clingen_raw_by_variant = clingen_raw_by_variant or {}
+    clinvar_tally_raw_by_variant = clinvar_tally_raw_by_variant or {}
 
     for i, variant in enumerate(variants):
         gene = (variant.get("Gene") or "NA").strip()
@@ -206,13 +273,35 @@ def build_actionable_set(
             )
             continue
 
-        litvar2_text = litvar2_raw_by_variant.get(i)
+        resolved_status = resolve_variant_clinvar_status(clinvar_tally_raw_by_variant.get(i))
+        if is_pathogenic_clinvar(resolved_status):
+            actionable_indices.add(i)
+            reasons[i] = f"ClinVar submission tally (variant-level, deterministic): {resolved_status}"
+            logger.info(
+                "[ACMG-SF] Variant %d (%s) flagged actionable via ClinVarGeneStatsTool "
+                "submission tally (CSV ClinVar_class was unusable): %s",
+                i + 1, gene, resolved_status,
+            )
+            continue
+
         hgvs = variant.get("HGVS") or variant.get("Variant") or "this variant"
+
+        litvar2_text = litvar2_raw_by_variant.get(i)
         if litvar2_text and _slm_check_litvar2_pathogenic(gene, hgvs, litvar2_text, llm):
             actionable_indices.add(i)
             reasons[i] = "P/LP variant reported for this gene in literature (LitVar2/PubMed evidence)"
             logger.info(
                 "[ACMG-SF] Variant %d (%s) flagged actionable via litvar2 evidence fallback",
+                i + 1, gene,
+            )
+            continue
+
+        clingen_text = clingen_raw_by_variant.get(i)
+        if clingen_text and _slm_check_clingen_pathogenic(gene, hgvs, clingen_text, llm):
+            actionable_indices.add(i)
+            reasons[i] = "P/LP variant per ClinGen Allele Registry ClinVar cross-reference"
+            logger.info(
+                "[ACMG-SF] Variant %d (%s) flagged actionable via clingen_allele evidence fallback",
                 i + 1, gene,
             )
 

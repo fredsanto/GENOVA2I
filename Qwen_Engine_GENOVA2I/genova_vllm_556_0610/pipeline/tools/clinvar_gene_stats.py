@@ -204,6 +204,37 @@ class ClinVarGeneStatsTool(NetworkTool):
     # first, before this tool's own independent (weaker) HGVS-only esearch.
     _CLINGEN_CLINVAR_ID_RE = re.compile(r"ClinVar variation ID:\s*(\d+)")
 
+    # ClinVar's official star rating, keyed by the record's own aggregate
+    # "ReviewStatus" text (ClassifiedRecord/Classifications/
+    # GermlineClassification/ReviewStatus — the record-level consensus
+    # review status shown as stars on ClinVar's own website, distinct from
+    # each individual ClinicalAssertion's own per-submitter ReviewStatus,
+    # which this tool does not use). Source: ClinVar's published
+    # review-status-to-star-rating table. Lookup is case-insensitive; an
+    # unrecognized status string (schema drift) maps to None rather than a
+    # guessed star count.
+    _REVIEW_STATUS_STARS: dict[str, int] = {
+        "practice guideline": 4,
+        "reviewed by expert panel": 3,
+        "criteria provided, multiple submitters, no conflicts": 2,
+        "criteria provided, conflicting classifications": 1,
+        "criteria provided, conflicting interpretations": 1,  # older wording, same rating
+        "criteria provided, single submitter": 1,
+        "no assertion criteria provided": 0,
+        "no classification provided": 0,
+        "no classification for the single variant": 0,
+        "no classification for the individual variant": 0,
+    }
+
+    @classmethod
+    def _stars_for_review_status(cls, review_status: str | None) -> int | None:
+        """Maps a ClinVar record's own aggregate ReviewStatus text to its
+        star rating (0-4), or None if the text doesn't match a known status
+        string."""
+        if not review_status:
+            return None
+        return cls._REVIEW_STATUS_STARS.get(review_status.strip().lower())
+
     def _resolve_variation_id(self, gene: str, hgvs: str) -> str | None:
         """
         Returns the resolved ClinVar variation ID, or None when the esearch
@@ -243,7 +274,9 @@ class ClinVarGeneStatsTool(NetworkTool):
 
     def _fetch_classification_tally(self, variation_id: str) -> dict | None:
         """
-        Returns {"counts": {bucket: n, ...}, "pl_evidence": [line, ...]} or None.
+        Returns {"counts": {bucket: n, ...}, "pl_evidence": [line, ...],
+        "review_status": str | None, "stars": int | None,
+        "aggregate_classification": str | None} or None.
 
         pl_evidence has one entry per individual Pathogenic/Likely-pathogenic
         submission — submitter, SCV accession, cited PMIDs (both
@@ -252,6 +285,12 @@ class ClinVarGeneStatsTool(NetworkTool):
         experimental evidence]" tag when the Comment text matches a
         _FUNCTIONAL_MARKERS keyword. Always populated regardless of whether
         the tally turns out conflicting — run() decides what to surface.
+
+        review_status/stars/aggregate_classification come from the record's
+        OWN top-level consensus (ClassifiedRecord/Classifications/
+        GermlineClassification), not from re-deriving anything ourselves —
+        this is ClinVar's own official star rating and overall call, exactly
+        what a human reviewer sees on the ClinVar website for this variant.
         """
         try:
             xml = _ncbi_get(
@@ -275,6 +314,16 @@ class ClinVarGeneStatsTool(NetworkTool):
         assertions = cal.findall("ClinicalAssertion") if cal is not None else []
         if not assertions:
             return None
+
+        agg_gc = cr.find("Classifications/GermlineClassification") if cr is not None else None
+        review_status = None
+        aggregate_classification = None
+        if agg_gc is not None:
+            rs_el = agg_gc.find("ReviewStatus")
+            review_status = (rs_el.text or "").strip() if rs_el is not None and rs_el.text else None
+            desc_el = agg_gc.find("Description")
+            aggregate_classification = (desc_el.text or "").strip() if desc_el is not None and desc_el.text else None
+        stars = self._stars_for_review_status(review_status)
 
         counts: dict[str, int] = {}
         pl_evidence: list[str] = []
@@ -317,7 +366,13 @@ class ClinVarGeneStatsTool(NetworkTool):
                 line += f"{tag}\n  Rationale: {comment[:600]}"
             pl_evidence.append(line)
 
-        return {"counts": counts, "pl_evidence": pl_evidence}
+        return {
+            "counts": counts,
+            "pl_evidence": pl_evidence,
+            "review_status": review_status,
+            "stars": stars,
+            "aggregate_classification": aggregate_classification,
+        }
 
     def run(self, variant: dict, context: ToolContext) -> str | None:
         gene = context.field("Gene")
@@ -396,9 +451,27 @@ class ClinVarGeneStatsTool(NetworkTool):
                 f"\nOther/unrecognized: {', '.join(f'{k}={v}' for k, v in other.items())}"
                 if other else ""
             )
+            # Star rating / aggregate call come from the record's own
+            # top-level consensus (ClinVar's official star rating and
+            # overall classification, not re-derived from the per-submitter
+            # tally below) — printed only when the XML actually carried
+            # them, per the "errors are informative, not silent" rule but
+            # also the flip side of it: don't assert a rating we don't have.
+            review_status = result.get("review_status")
+            stars = result.get("stars")
+            aggregate_classification = result.get("aggregate_classification")
+            review_line = ""
+            if review_status:
+                star_text = f"{stars} star{'s' if stars != 1 else ''}" if stars is not None else "star rating unknown for this status string"
+                review_line = f"ClinVar review status: {review_status} ({star_text})\n"
+            aggregate_line = (
+                f"ClinVar aggregate classification (official consensus call): {aggregate_classification}\n"
+                if aggregate_classification else ""
+            )
             variant_block = (
                 f"CLINVAR VARIANT-LEVEL SUBMISSION TALLY (variation ID {variation_id}, "
                 f"{total} individual submissions):\n"
+                f"{review_line}{aggregate_line}"
                 f"{known_lines}{other_line}"
             )
 

@@ -23,6 +23,7 @@ Public API:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -95,6 +96,254 @@ def _build_actionable_text(actionable_variants: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
+# ── Deterministic causative-list completeness check ─────────────────────────
+#
+# recompute_and_fix_totals() (pipeline.core.acmg_points) guarantees a stated
+# total is arithmetically correct. It says nothing about whether a qualifying
+# variant was silently dropped from section 2 entirely — a real observed
+# failure: the synthesis model picked a single "winner" gene across layers
+# (e.g. a De Novo finding) and demoted a separately-qualifying
+# Dominant-Inherited finding in a different gene to an "also present, possibly
+# coincidental" footnote, even though prompts/clinical_conclusion.txt's
+# CAUSATIVE THRESHOLD RULE explicitly forbids treating this as a competition.
+# This check re-derives, independently of the LLM, which variants the rule
+# requires in section 2, and mechanically appends any the model dropped.
+
+_CAUSATIVE_THRESHOLD = 6.0
+
+_JOINT_STATUS_RE = re.compile(
+    r"\*\*Joint compound-het classification:\*\*\s*(CAUSATIVE|COMPOUND VUS)"
+)
+
+
+def _qualifying_causative_findings(
+    layer_outputs: dict[str, list[str]], unclassified_conclusions: list[str]
+) -> list[dict]:
+    """
+    Collect every variant the CAUSATIVE THRESHOLD RULE requires in section 2:
+    any block (De Novo / Dominant-Inherited / X-Linked / Unclassified / a
+    homozygous-solo Recessive block) whose own final total is >= 6 points, or
+    both variants of a compound-het PAIR block whose own "Joint compound-het
+    classification" line says CAUSATIVE — never a COMPOUND VUS pair, even
+    when one partner's individual total alone is >= 6 (see
+    moi_recessive.py's _joint_compound_het_status).
+    """
+    findings: list[dict] = []
+
+    def _process(block: str, layer_name: str) -> None:
+        joint_m = _JOINT_STATUS_RE.search(block)
+        if joint_m:
+            if joint_m.group(1) != "CAUSATIVE":
+                return  # COMPOUND VUS pair — neither partner is causative here
+            headers = list(_HEADER_LINE_RE.finditer(block))
+            totals = list(_ANY_TOTAL_RE.finditer(block))
+            for header_m, total_m in zip(headers, totals):
+                try:
+                    points = float(total_m.group(1))
+                except ValueError:
+                    continue
+                findings.append({
+                    "gene":   header_m.group("gene").strip(),
+                    "detail": header_m.group("detail").strip(),
+                    "points": points,
+                    "label":  total_m.group(2).strip(),
+                    "layer":  layer_name,
+                })
+            return
+        f = _extract_variant_finding(block)
+        if f and f["points"] >= _CAUSATIVE_THRESHOLD:
+            f["layer"] = layer_name
+            findings.append(f)
+
+    for layer_name, blocks in layer_outputs.items():
+        for block in blocks:
+            _process(block, layer_name)
+    for block in unclassified_conclusions:
+        _process(block, "Unclassified")
+    return findings
+
+
+def _missing_from_section_2(text: str, findings: list[dict]) -> list[dict]:
+    """
+    The subset of `findings` whose gene name is not mentioned in the
+    "2) Causative variant(s):" section of `text` — checked against that
+    section's own text only, since a gene demoted to a reasoning-prose
+    footnote or the VUS section does not count as being listed as causative.
+    """
+    m2 = re.search(r"^\s*2\)\s", text, re.MULTILINE)
+    if not m2:
+        return findings  # no section 2 at all — everything is "missing"
+    m3 = re.search(r"^\s*3\)\s", text, re.MULTILINE)
+    section2 = text[m2.start(): m3.start() if m3 else len(text)]
+    return [f for f in findings if not re.search(rf"\b{re.escape(f['gene'])}\b", section2)]
+
+
+def _enforce_causative_completeness(
+    text: str,
+    layer_outputs: dict[str, list[str]],
+    unclassified_conclusions: list[str],
+) -> str:
+    """
+    Append a mechanically-assembled addendum, right before section 3, for any
+    variant the CAUSATIVE THRESHOLD RULE requires in section 2 but that the
+    LLM synthesis dropped. No-op (returns `text` unchanged) when nothing is
+    missing.
+    """
+    findings = _qualifying_causative_findings(layer_outputs, unclassified_conclusions)
+    missing = _missing_from_section_2(text, findings)
+    if not missing:
+        return text
+
+    logger.warning(
+        "[FinalConclusion] Completeness check: %d causative-threshold variant(s) "
+        "missing from section 2 (%s) — appending mechanically.",
+        len(missing), ", ".join(f["gene"] for f in missing),
+    )
+    addendum_lines = [
+        "",
+        "[COMPLETENESS CHECK — the following variant(s) independently meet the "
+        "CAUSATIVE THRESHOLD RULE (own layer block total ACMG points >= 6, or "
+        "part of a CAUSATIVE compound-het pair) but were not named above; "
+        "listed here mechanically from each block's own already-verified "
+        "total. Consult the MOI-layer blocks for full evidence, segregation, "
+        "and citations.]",
+    ]
+    for f in missing:
+        addendum_lines.append(
+            f"- {f['gene']} ({f['detail']}) — [{f['layer']} layer] "
+            f"{_fmt_points(f['points'])} pts total → {f['label']}"
+        )
+    addendum = "\n".join(addendum_lines) + "\n"
+
+    m3 = re.search(r"^\s*3\)\s", text, re.MULTILINE)
+    if m3:
+        return text[: m3.start()] + addendum + "\n" + text[m3.start():]
+    return text + "\n" + addendum
+
+
+# ── Deterministic last-resort fallback ──────────────────────────────────────
+#
+# Used only when the LLM fails to produce a well-formed "# Clinical
+# Conclusion" even after one retry (see run() below) — e.g. the SPATA13/
+# arithmetic-rambling failure this module's docstring-level comments already
+# describe, where the model burns its entire token budget re-litigating a
+# single variant and never reaches the actual conclusion. Rather than ship a
+# report with zero synthesis (previously: "whichever malformed pass happened
+# to be longer"), assemble a minimal but guaranteed-well-formed conclusion
+# mechanically from each block's own header + already-verified total line —
+# every MOI/base stage (moi_denovo.py, moi_dominant.py, moi_recessive.py,
+# moi_xlinked.py, conclusion.py) already ran recompute_and_fix_totals on its
+# output before this stage ever saw it, so these numbers need no re-checking.
+
+_HEADER_LINE_RE = re.compile(
+    r"^#\s*[^\n]*?—\s*(?P<gene>[^(\n]+?)\s*\((?P<detail>[^\n]*)\)\s*$", re.MULTILINE
+)
+_ANY_TOTAL_RE = re.compile(
+    r"\*\*(?:Total )?ACMG points:\*\*\s*([-+]?\d+(?:\.\d+)?)\s*→\s*([A-Za-z /()]+)"
+)
+
+
+def _fmt_points(n: float) -> str:
+    return str(int(n)) if n == int(n) else str(n)
+
+
+def _extract_variant_finding(block: str) -> dict | None:
+    """
+    Best-effort deterministic extraction of (gene, detail, points, label)
+    from one layer/base block's own header line and its own final total
+    line (the LAST "ACMG points"/"Total ACMG points" match — a MOI-layer
+    block states a "Base ACMG points" line first and the delta-adjusted
+    "Total ACMG points" line after it; the last match is always the correct,
+    fully-adjusted one). Returns None if either piece can't be found — a
+    missing finding here is preferable to a fabricated one.
+    """
+    header_m = _HEADER_LINE_RE.search(block)
+    total_ms = list(_ANY_TOTAL_RE.finditer(block))
+    if not header_m or not total_ms:
+        return None
+    points_str, label = total_ms[-1].groups()
+    try:
+        points = float(points_str)
+    except ValueError:
+        return None
+    return {
+        "gene":   header_m.group("gene").strip(),
+        "detail": header_m.group("detail").strip(),
+        "points": points,
+        "label":  label.strip(),
+    }
+
+
+def _deterministic_fallback(
+    layer_outputs: dict[str, list[str]],
+    unclassified_conclusions: list[str],
+    patient_phenotype: str,
+    actionable_text: str,
+) -> str:
+    """
+    Last-resort synthesis, guaranteed to pass _is_well_formed(), assembled
+    with zero LLM involvement so it cannot itself ramble or truncate. Trades
+    the LLM's prose/citations/segregation narrative for a guarantee that the
+    report never ships with no answer at all.
+    """
+    findings = []
+    for layer_name, blocks in layer_outputs.items():
+        for block in blocks:
+            f = _extract_variant_finding(block)
+            if f:
+                f["layer"] = layer_name
+                findings.append(f)
+    for block in unclassified_conclusions:
+        f = _extract_variant_finding(block)
+        if f:
+            f["layer"] = "Unclassified"
+            findings.append(f)
+
+    causative = [f for f in findings if f["points"] >= 6]
+    vus       = [f for f in findings if 4 <= f["points"] < 6]
+
+    lines = [
+        "# Clinical Conclusion",
+        "",
+        "[AUTOMATED FALLBACK — the clinical-conclusion synthesis stage did not "
+        "produce a well-formed response even after a retry; this section was "
+        "assembled mechanically from each finding's own already-verified ACMG "
+        "total rather than narrative synthesis. Consult the MOI-layer blocks "
+        "above for full evidence, segregation, and citations.]",
+        "",
+        f"1) Summary of clinical phenotype: {patient_phenotype}",
+        "",
+        "2) Causative variant(s):",
+    ]
+    if causative:
+        for f in causative:
+            lines.append(
+                f"- {f['gene']} ({f['detail']}) — [{f['layer']} layer] "
+                f"{_fmt_points(f['points'])} pts total → {f['label']}"
+            )
+    else:
+        lines.append("None identified.")
+    lines += [
+        "",
+        "3) Actionable findings (ACMG SF):",
+        actionable_text,
+        "",
+        "4) Notable VUS (ACMG >= 4 and < 6 points):",
+    ]
+    if vus:
+        for f in vus:
+            lines.append(f"- {f['gene']} ({f['detail']}) — {_fmt_points(f['points'])} pts")
+    else:
+        lines.append("None identified.")
+    lines += [
+        "",
+        "5) Summary: See causative variant(s) in section 2 above — full "
+        "narrative synthesis was unavailable for this run; refer to each "
+        "variant's own MOI-layer block for detailed evidence.",
+    ]
+    return "\n".join(lines)
+
+
 def run(
     layer_outputs: dict[str, list[str]],
     unclassified_conclusions: list[str],
@@ -164,6 +413,53 @@ def run(
         .replace("{actionable_variants}", actionable_text)
         .replace("{draft}", draft))
 
+    def _finalize(candidate: str) -> str:
+        fixed = recompute_and_fix_totals(candidate)
+        return _enforce_causative_completeness(fixed, layer_outputs, unclassified_conclusions)
+
+    def _recover_from_malformed_draft() -> str:
+        """
+        Both draft and revised failed _is_well_formed() — a real recurring
+        failure (see clinical_conclusion.txt's SPATA13/arithmetic-rambling
+        notes): the model burns its whole token budget re-litigating a
+        single variant and never reaches "# Clinical Conclusion" at all.
+        Retry the draft generation once more (fresh call, same prompt —
+        Qwen3.5 is non-deterministic enough at temperature>0 that a repeat
+        call frequently avoids the same rabbit hole) before giving up. If
+        the retry also fails, fall back to a deterministic, zero-LLM
+        synthesis rather than shipping "whichever malformed pass happened
+        to be longer" — a raw rambling transcript with no actual answer.
+        """
+        logger.warning(
+            "[FinalConclusion] Both draft and revise passes are malformed/truncated "
+            "(missing a numbered section) — retrying draft generation once more."
+        )
+        retry_draft = llm.generate(
+            system=(
+                "You are an expert clinical geneticist. Limit your response to "
+                "1000 words maximum. Decide each variant's status ONCE and move "
+                "on immediately — do not write multiple rounds of "
+                "reconsideration or re-derive any stated ACMG total."
+            ),
+            user=user_prompt,
+            max_tokens=MAX_NEW_TOKENS_FINAL_CONCLUSION,
+        )
+        if _is_well_formed(retry_draft):
+            logger.info("[FinalConclusion] Retry succeeded — using retried draft.")
+            return _finalize(retry_draft)
+
+        logger.warning(
+            "[FinalConclusion] Retry also malformed — falling back to a "
+            "deterministic conclusion assembled from each layer's own "
+            "already-verified totals."
+        )
+        return _enforce_causative_completeness(
+            _deterministic_fallback(
+                layer_outputs, unclassified_conclusions, patient_phenotype, actionable_text,
+            ),
+            layer_outputs, unclassified_conclusions,
+        )
+
     try:
         revised = llm.generate(
             system="You are an expert clinical geneticist, fact-checking a draft report against source data.",
@@ -172,7 +468,9 @@ def run(
         )
     except Exception as exc:
         logger.warning("[FinalConclusion] Revise pass failed (%s) — using unrevised draft.", exc)
-        return recompute_and_fix_totals(draft)
+        if _is_well_formed(draft):
+            return _finalize(draft)
+        return _recover_from_malformed_draft()
 
     if not _is_well_formed(revised):
         if _is_well_formed(draft):
@@ -180,19 +478,15 @@ def run(
                 "[FinalConclusion] Revise pass produced malformed/truncated output "
                 "(missing a numbered section) — using unrevised draft."
             )
-            return recompute_and_fix_totals(draft)
-        logger.warning(
-            "[FinalConclusion] Both draft and revise passes are malformed/truncated "
-            "(missing a numbered section) — using whichever is longer."
-        )
-        return recompute_and_fix_totals(revised if len(revised) >= len(draft) else draft)
+            return _finalize(draft)
+        return _recover_from_malformed_draft()
 
-    # Re-sum every "**ACMG classification:** Label (N pts total)" line here
-    # against its own immediately-preceding criteria bullets before handing
-    # the report to the user — this is the block the user actually reads,
-    # and a wrong total surviving every upstream stage's own check (or a
-    # criterion the synthesis itself dropped/added while copying) is still
-    # visible here even if it wasn't visible earlier. See
-    # acmg_points.recompute_and_fix_totals for the recurring failure this
-    # guards against.
-    return recompute_and_fix_totals(revised)
+    # Re-sum every "**ACMG classification:** Label (N pts total)" line, then
+    # re-check causative-list completeness, here — against its own
+    # immediately-preceding criteria bullets / the full layer-output set —
+    # before handing the report to the user. This is the block the user
+    # actually reads, and either failure surviving every upstream stage's own
+    # check is still visible here even if it wasn't visible earlier. See
+    # acmg_points.recompute_and_fix_totals and _enforce_causative_completeness
+    # above for the recurring failures these guard against.
+    return _finalize(revised)

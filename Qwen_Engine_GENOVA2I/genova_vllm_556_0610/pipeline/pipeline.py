@@ -580,9 +580,36 @@ class Pipeline:
             for entry in self._executor.process_log
             if entry["tool_name"] == "litvar2_summary" and entry["gate"] == "PASS"
         }
+        # clingen_allele already resolved this variant against the ClinGen
+        # Allele Registry earlier in retrieval (CAid + ClinVar variation
+        # ID/RCV cross-reference) — reuse that existing fetch as a second
+        # fallback source alongside litvar2 rather than re-fetching anything,
+        # for the case where the CSV's own ClinVar_class column is missing or
+        # was mismapped by the header interpreter (real observed case: a
+        # dated column name like "ClinVar.20230813..Stars..Conflict_details."
+        # went unmapped while an unrelated empty column was mapped to
+        # ClinVar_class instead, silently losing a Pathogenic BRCA1 call).
+        clingen_raw_by_variant: dict[int, str | None] = {
+            entry["variant_index"]: entry.get("raw_output")
+            for entry in self._executor.process_log
+            if entry["tool_name"] == "clingen_allele" and entry["gate"] == "PASS"
+        }
+        # clinvar_gene_stats already fetched this variant's own real
+        # per-submission ClinVar classification tally (NCBI efetch VCV
+        # record) earlier in retrieval — deterministic ground truth,
+        # independent of the CSV's own (SLM-mapped, sometimes wrong)
+        # ClinVar_class column. See acmg_sf.build_actionable_set's docstring
+        # for the BRCA1 case this was added for.
+        clinvar_tally_raw_by_variant: dict[int, str | None] = {
+            entry["variant_index"]: entry.get("raw_output")
+            for entry in self._executor.process_log
+            if entry["tool_name"] == "clinvar_gene_stats" and entry["gate"] == "PASS"
+        }
         actionable_indices, actionable_reasons = acmg_sf.build_actionable_set(
             variants=variants,
             litvar2_raw_by_variant=litvar2_raw_by_variant,
+            clingen_raw_by_variant=clingen_raw_by_variant,
+            clinvar_tally_raw_by_variant=clinvar_tally_raw_by_variant,
             llm=self._llm,
         )
         if actionable_indices:

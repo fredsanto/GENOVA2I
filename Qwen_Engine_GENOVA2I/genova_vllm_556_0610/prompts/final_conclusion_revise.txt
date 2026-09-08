@@ -91,7 +91,19 @@ Specifically check for:
   (or its embedded base conclusion).
 - Any ACMG classification or point total in the draft that does not exactly
   match the "ACMG points:" / "Total ACMG points:" line in that variant's own
-  layer block.
+  layer block. This is a STRING COMPARISON against that line as written — the
+  layer block's own number was already deterministically re-summed and
+  corrected by code before you ever saw it, so it is never wrong; do not
+  re-derive it from the criteria list yourself or spend more than one
+  sentence on any single variant's total, even if it looks surprising (e.g.
+  a large Base+delta combination). A real past failure: the model spent its
+  entire output re-deriving whether a variant's own "Total ACMG points: 14 →
+  Pathogenic" line was correct — repeatedly recomputing the sum, second-
+  guessing which criteria applied — before concluding (correctly, and
+  unnecessarily) that the stated total had been right all along, burning the
+  token budget before # Clinical Conclusion was ever written. If the draft's
+  copied number differs from the source line, fix the draft's number to
+  match the source line, state that in one sentence, and move on.
 - Any inheritance/segregation claim (de novo, maternal/paternal, carrier
   status) in the draft that conflicts with what that variant's own layer
   block states.

@@ -149,10 +149,10 @@ def recompute_and_fix_totals(text: str) -> str:
             line = lines[j]
             if not line.strip():
                 break
-            m = _CRITERION_TAG_RE.search(line)
-            if not m:
+            tags = _CRITERION_TAG_RE.findall(line)
+            if not tags:
                 break
-            total += float(m.group(1))
+            total += sum(float(t) for t in tags)
             found_any = True
             j -= 1
         return total if found_any else None

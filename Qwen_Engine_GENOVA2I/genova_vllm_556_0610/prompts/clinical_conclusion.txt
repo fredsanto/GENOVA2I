@@ -113,6 +113,23 @@ before ever reaching the # Clinical Conclusion section, and the response was
 cut off by the token budget before section 5 was ever written — every
 variant after the one it got stuck on was silently lost. State the decision
 and its one-sentence reason, then continue to the next variant:
+
+EVERY block's own "Total ACMG points"/"ACMG points" line above (and its
+"Base ACMG points"/delta lines, where present) was already deterministically
+re-summed and corrected by code before this stage ever received it — it is
+not the model's own arithmetic and it is never wrong. Copy the stated number
+and classification as given; do NOT re-add the criteria list yourself to
+"double check" it, and do NOT treat an unfamiliar-looking total (e.g. a
+Base+delta combination that looks large) as a discrepancy to investigate. A
+second real past failure, same root cause as the SPATA13 one above but
+triggered by arithmetic instead of causative-status doubt: the model spent
+an entire response re-deriving whether a variant's own "Total ACMG points: 14
+→ Pathogenic" line was correct — repeatedly recomputing 10+4, second-guessing
+which criteria list applied, cross-checking against an unrelated variant's
+block — before concluding (correctly, and unnecessarily) that the stated
+total had been right all along, by which point the token budget was spent
+and no # Clinical Conclusion section was ever written. If a total looks
+surprising, state that once in one sentence and move on — never re-sum it.
 - A RECESSIVE layer block of the "(compound heterozygous / biallelic)" PAIR
   kind covers BOTH its variants jointly (they are presented as co-causative,
   not competing) ONLY when its own "**Joint compound-het classification:**"
@@ -255,10 +272,16 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    independent axes, and a high point total is never a reason to drop this
    caveat during synthesis; population
    frequency (rare/absent from controls, per PM2/BA1/BS1 evidence);
-   ClinVar classification and review status, if present in the layer block
-   (e.g. "ClinVar: Pathogenic, 1 submitter" or "ClinVar: Uncertain
-   significance") — state this explicitly whenever the layer block mentions
-   it, even if no ACMG criterion is tied to it; mutational hot spot / critical
+   ClinVar classification, review status and star rating, and full
+   per-submission tally, if present in the layer block's own **ClinVar:**
+   line (e.g. "ClinVar: Pathogenic; review status: criteria provided,
+   multiple submitters, no conflicts (2 stars); tally: Pathogenic=46,
+   Likely pathogenic=0, Uncertain significance=0, Likely benign=0,
+   Benign=0") — copy the star rating and the full 5-bucket tally verbatim
+   from that line whenever it states them, even if no ACMG criterion is
+   tied to it; do not shorten this to just the classification when the
+   source line has more than that. State this explicitly whenever the
+   layer block mentions it; mutational hot spot / critical
    domain status (per PM1 evidence), if applicable; loss-of-function
    mechanism (per PVS1 evidence), if applicable; relevant publications, with
    PMIDs, if cited; and why this variant (jointly with its trans partner,
@@ -349,7 +372,16 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    itself is Likely Pathogenic and belongs in section 2, not here)
    AND a classification of "Uncertain significance" / "VUS". List each as [GENE]
    ([HGVS]) — [N] pts, with a one-sentence justification copied from that
-   variant's own criteria list. Do not include a variant already listed in
+   variant's own criteria list. If that variant's own layer/base block's
+   **ClinVar:** line states a review status/star rating and/or a
+   per-submission tally (Pathogenic/Likely pathogenic/Uncertain
+   significance/Likely benign/Benign counts), append them too — e.g. "...;
+   ClinVar: Uncertain significance, review status: criteria provided,
+   single submitter (1 star), tally: Pathogenic=0, Likely pathogenic=1,
+   Uncertain significance=3, Likely benign=0, Benign=0" — do not drop this
+   information for a VUS entry just because the write-up here is shorter
+   than section 2's; state "ClinVar: no entry found" only when the source
+   block itself says so. Do not include a variant already listed in
    section 2 as causative. If no such variant exists, write exactly: "None
    identified."
 
