@@ -686,22 +686,27 @@ class LitVar2SummaryTool(SLMTool):
         """
         # Broaden the phenotype terms with a bare "disease" OR-term so generic
         # gene-disease association papers (that don't use the LLM-resolved
-        # phenotype wording) still match, and sort by publication date so the
-        # most recent literature is retrieved first (relevance sort can bury
-        # newly-characterized gene-disease links, e.g. a gene only linked to
-        # its condition in the last year or two).
+        # phenotype wording) still match.
         # Also OR-in inheritance-mode vocabulary so papers establishing how the
         # gene's disease is inherited (needed downstream for the AR/AD/XLR gate
         # and phase-check logic) are preferentially retrieved within the
         # max_pmids-capped pool, not just papers matching the phenotype wording.
+        #
+        # Sort by relevance (the _esearch_gene default), not pub_date: with this
+        # OR-heavy query almost any paper mentioning the gene near a disease/
+        # inheritance word matches, so a pub_date-primary sort returns the N most
+        # recent papers on the gene regardless of topic — for a gene whose
+        # founding gene-disease paper is old (e.g. SYN1-epilepsy, established in
+        # 2004/2011) that paper is pushed out of the max_pmids window entirely
+        # and every candidate the SLM sees is an unrelated recent publication.
+        # _esearch_gene already adds a supplemental pub_date-sorted call when
+        # total_count exceeds max_pmids, so recent literature is still covered.
         inheritance_terms = 'recessive OR dominant OR "x-linked" OR "de novo" OR biallelic'
         disease_query = (
             f"({self._disease_query}) OR disease OR {inheritance_terms}"
             if self._disease_query else f"disease OR {inheritance_terms}"
         )
-        pmids, total_count, _ = self._esearch_gene(
-            gene, disease_query, sort="pub_date"
-        )
+        pmids, total_count, _ = self._esearch_gene(gene, disease_query)
 
         # Header line shared by all output branches
         def _header(extra: str = "") -> str:
