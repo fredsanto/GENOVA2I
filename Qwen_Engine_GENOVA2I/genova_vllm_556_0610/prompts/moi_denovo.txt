@@ -51,11 +51,39 @@ TASK:
    dominant-relevant mode, with de novo status simply unassessed, per the
    base score alone.
 
-4. If SEGREGATION above does NOT state "de_novo" (e.g. it says "maternal",
-   "paternal", or "uncertain") even though trio data is present: this
-   variant is not de novo — do not apply PS2 or PM6 here. Note this
-   explicitly; this variant belongs in the dominant-inherited layer instead,
-   not this one.
+4. If SEGREGATION above does NOT literally state "de_novo" (as its own exact
+   word, not merely "trio data with a low reading somewhere") even though
+   trio data is present: this variant is not de novo — do not apply PS2 or
+   PM6 here, regardless of which of the other backend values it names below.
+   Note this explicitly; this variant belongs in the dominant-inherited (or
+   recessive) layer instead, not this one. The full set of non-"de_novo"
+   values SEGREGATION can hold, and what each one means — copy the value
+   verbatim, never re-derive or reinterpret it from the raw allelic-balance
+   numbers yourself, and never invent a gloss for one not listed here:
+   - "maternal" / "paternal" — proband het, ONE parent het, other parent
+     absent: a confirmed INHERITED transmission, not de novo.
+   - "both_carriers" — proband hom, BOTH parents het: classic recessive
+     carrier pattern, not de novo (belongs in the recessive layer).
+   - "homozygous_parent" — a parent's own AB reads ~1.0 for this exact
+     variant, i.e. that parent is HOMOZYGOUS FOR THE VARIANT ITSELF (NOT
+     "homozygous reference"/wild-type — an AB near 1.0 is the opposite of
+     wild-type, it means nearly all reads carry the alt allele). This is
+     the STRONGEST possible evidence AGAINST de novo — stronger than a
+     simple heterozygous carrier parent, not weaker, and never a signal
+     that supports or "confirms" de novo. A real observed failure: a
+     father's AB=1.00 for the variant was misread as "homozygous
+     reference" and used to claim a de novo origin — the diametric
+     opposite of what that reading means. Never repeat this.
+   - "uncertain" — parent data present but doesn't cleanly match any known
+     pattern (including the ambiguous 0.2-0.3/0.7-0.8 AB bands, or a
+     proband/parent combination inconsistent with a single clean pattern):
+     de novo status could not be confirmed. Do not apply PS2 on the theory
+     that "uncertain might still mean de novo" — SEGREGATION already
+     resolved this deterministically; treat it as a closed question, not an
+     invitation to reconsider from the raw numbers.
+   - "insufficient_data" — neither parent's AB is present at all: de novo
+     status cannot be assessed (same handling as PARENTAL DATA STATUS
+     "none" in rule 3 above).
 
 Use exactly this format:
 
