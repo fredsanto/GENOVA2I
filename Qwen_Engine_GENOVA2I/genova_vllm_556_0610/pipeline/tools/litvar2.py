@@ -70,6 +70,15 @@ MAX_PMIDS     = 40             # hard cap on PMIDs fetched from LitVar2
 TOP_N_PAPERS  = 8              # how many titles the SLM keeps
 MAX_CHARS     = 1200           # abstract truncation per paper (~full abstract)
 DEFAULT_TIMEOUT = 15
+SELECT_BATCH_SIZE = 10         # titles per relevance-scoring SLM call — a single call
+                                # over the full pool (up to ~58 titles: 40 relevance +
+                                # 20 pub_date recency, deduped) exhibits positional bias
+                                # in the 9B non-thinking model: it reliably picks from the
+                                # first ~10 titles and never meaningfully considers entries
+                                # further down the list, regardless of actual relevance.
+                                # Scoring in small batches forces the model to emit a
+                                # number for every title instead of making one holistic
+                                # pick over the whole list.
 
 # Global rate limiter: serialises NCBI/LitVar2 request slots across all threads.
 # With 32 concurrent workers, per-thread sleep(0.34) would burst 32 requests at
@@ -409,47 +418,83 @@ class LitVar2SummaryTool(SLMTool):
 
     # ── step 3: SLM title filter ──────────────────────────────────────────────
 
+    def _score_titles_batch(
+        self,
+        batch: list[tuple[str, str]],
+        question: str,
+        context: ToolContext,
+    ) -> dict[str, int]:
+        """
+        Ask the SLM to score every title in *batch* (0-10) against *question*.
+        Small batch size keeps the model attending to each title individually
+        instead of skimming a long list. Returns {pmid: score}; a pmid missing
+        from the parsed response (bad JSON, model dropped it) is simply absent —
+        callers must treat that as "unscored", not "irrelevant".
+        """
+        numbered = "\n".join(
+            f"{i+1}. [PMID:{pmid}] {title}" for i, (pmid, title) in enumerate(batch)
+        )
+        valid_pmids = {pmid for pmid, _ in batch}
+
+        system = (
+            "You are a biomedical literature relevance scorer. "
+            "For EACH paper title below, output a relevance score from 0 (irrelevant) "
+            "to 10 (directly relevant) to the research question. Score every title — "
+            "do not skip any, do not select a subset. "
+            "Output ONLY a JSON object mapping each PMID string to its integer score, "
+            "e.g. {\"12345678\": 8, \"87654321\": 2}. No explanation, no markdown, no extra text."
+        )
+        user = f"Research question: {question}\n\nTitles:\n{numbered}"
+
+        raw = context.llm.generate(system=system, user=user, max_tokens=200).strip()
+
+        try:
+            match = re.search(r"\{.*?\}", raw, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                return {
+                    str(pmid): int(score)
+                    for pmid, score in parsed.items()
+                    if str(pmid) in valid_pmids and str(int(score)) == str(score).strip()
+                }
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.warning("Could not parse batch relevance-scoring JSON (%s) — batch unscored", e)
+
+        return {}
+
     def _select_relevant_pmids(
         self,
         titles: dict[str, str],
         question: str,
         context: ToolContext,
     ) -> list[str]:
-        """Ask the SLM to pick the top_n most relevant PMIDs given the question."""
+        """
+        Score every title 0-10 against the question in small batches
+        (SELECT_BATCH_SIZE at a time), then keep the top_n highest-scoring PMIDs.
+        """
+        items = list(titles.items())
 
-        numbered = "\n".join(
-            f"{i+1}. [PMID:{pmid}] {title}"
-            for i, (pmid, title) in enumerate(titles.items())
+        scores: dict[str, int] = {}
+        for i in range(0, len(items), SELECT_BATCH_SIZE):
+            batch = items[i : i + SELECT_BATCH_SIZE]
+            scores.update(self._score_titles_batch(batch, question, context))
+
+        if not scores:
+            logger.warning("No titles could be scored — falling back to first %d", self.top_n)
+            return list(titles.keys())[: self.top_n]
+
+        # Unscored PMIDs (dropped by the model in a malformed batch response) rank
+        # last rather than being silently excluded from consideration.
+        ranked = sorted(
+            items, key=lambda kv: scores.get(kv[0], -1), reverse=True
         )
+        selected = [pmid for pmid, _ in ranked[: self.top_n] if scores.get(pmid, -1) > 0]
 
-        system = (
-            "You are a biomedical literature relevance filter. "
-            f"Select up to {self.top_n} papers whose titles are clearly relevant to the research question. Skip tangential ones. "
-            "Output ONLY a JSON array of PMID strings, e.g. [\"12345678\", \"87654321\"]. "
-            "No explanation, no markdown, no extra text."
-        )
-        user = (
-            f"Research question: {question}\n\n"
-            f"Paper list:\n{numbered}\n\n"
-            f"Return the {self.top_n} most relevant PMIDs as a JSON array."
-        )
+        if selected:
+            logger.debug("SLM scored selection: %d/%d PMIDs above 0", len(selected), len(items))
+            return selected
 
-        raw = context.llm.generate(system=system, user=user, max_tokens=256).strip()
-
-        # Parse JSON array robustly
-        try:
-            match = re.search(r"\[.*?\]", raw, re.DOTALL)
-            if match:
-                selected = json.loads(match.group())
-                # keep only valid PMIDs that exist in our titles dict
-                valid = [str(p) for p in selected if str(p) in titles]
-                if valid:
-                    logger.debug("SLM selected %d PMIDs", len(valid))
-                    return valid
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.warning("Could not parse SLM selection JSON (%s) — falling back to first %d", e, self.top_n)
-
-        # Fallback: just take the first top_n
+        # Every title scored 0 (or unscored) — fall back rather than return nothing.
         return list(titles.keys())[: self.top_n]
 
     # ── step 4: PMIDs → abstracts ─────────────────────────────────────────────
@@ -900,6 +945,95 @@ class LitVar2SummaryTool(SLMTool):
             f"LitVar2 variant-specific evidence for {rsid}\n"
             f"[Source: LitVar2 variant publications endpoint — "
             f"{len(titles)} records screened, {len(papers)} selected]\n\n"
+            f"{summary}\n\n"
+            f"Sources:\n{source_lines}"
+        )
+
+    # ── supplemental: phenotype-agnostic condition inventory (for PHENOTYPE tag) ──
+
+    def run_condition_inventory(self, gene: str, context: ToolContext) -> str | None:
+        """
+        Gene-level PubMed search for the PHENOTYPE tag (see prompts/
+        gene_phenotype_extraction.txt) — deliberately anchored on GENERIC
+        disease/inheritance vocabulary only ("disease", "syndrome",
+        "biallelic", "dominant", "recessive", "X-linked"), never on
+        context.patient_phenotype or self._disease_query (both patient-
+        derived). Both the esearch query AND the relevance-selection question
+        below are built from this fixed generic vocabulary alone.
+
+        Real observed failure this fixes: _gene_search (track 1) and
+        _omim_gene_search (track 2) both ultimately select/frame relevance
+        against the patient's own phenotype (self._disease_query, or the
+        gene's OMIM/CGD-known condition when a patient-independent one
+        happens to be catalogued there) — for a gene with a real, well-
+        documented condition that is neither the patient's phenotype nor
+        catalogued in OMIM/CGD as a distinct "known condition" entry (e.g. a
+        common-variant/GWAS-style complex-trait association rather than a
+        curated Mendelian entry), that condition is invisible to both
+        existing tracks and never reaches ANY downstream stage — including
+        the isolated gene-phenotype-extraction call, however well-worded its
+        prompt, since a call can only report conditions present in what it
+        was given. This track exists to retrieve those conditions in the
+        first place, independent of what the patient has or what OMIM/CGD
+        already curated for this gene.
+
+        Returns a positive evidence block when condition-bearing papers are
+        found, or None if the gene has no such literature at all (never an
+        error string — a clean negative is a legitimate outcome here, unlike
+        _gene_search's NO DISEASE LINK message, since this track is
+        supplemental input to a single tag, not a triage signal).
+        """
+        generic_query = (
+            'disease OR syndrome OR biallelic OR dominant OR recessive OR "x-linked"'
+        )
+        try:
+            pmids, total_count, _ = self._esearch_gene(gene, generic_query)
+        except PipelineError as e:
+            logger.warning("Condition-inventory search failed for gene=%s (%s)", gene, e)
+            return None
+
+        if not pmids:
+            return None
+
+        titles = self._fetch_titles(pmids)
+        if not titles:
+            return None
+
+        question = (
+            f"Does this paper name or describe a specific disease, syndrome, or "
+            f"clinical condition caused by {gene}? Score high for ANY named "
+            f"condition (regardless of what it is or how common/rare), low for "
+            f"papers that are purely population-genetics, mechanism-only, or "
+            f"risk-allele statistics with no named clinical entity attached."
+        )
+        selected_pmids = self._select_relevant_pmids(titles, question, context)
+        logger.info(
+            "Condition-inventory search %s: selected %d/%d papers",
+            gene, len(selected_pmids), len(titles),
+        )
+        if not selected_pmids:
+            return None
+
+        papers = self._fetch_abstracts(selected_pmids)
+        if not papers:
+            return None
+
+        inventory_question = (
+            f"List every distinct disease, condition, or syndrome name these "
+            f"abstracts attribute to {gene} — a complete inventory, not "
+            f"filtered to any particular phenotype. Name each one explicitly; "
+            f"do not summarize them into a single narrative."
+        )
+        summary = self._summarise(papers, inventory_question, gene, context)
+
+        source_lines = "\n".join(
+            f"  - [PMID:{pmid}, {p.get('year', 'n.d.')}] {p['title']}  {p['url']}"
+            for pmid, p in papers.items()
+        )
+        return (
+            f"PubMed condition inventory for {gene} (phenotype-agnostic — "
+            f"generic disease/inheritance query, not filtered by patient phenotype)\n"
+            f"[{len(titles)} screened, {len(papers)} selected]\n\n"
             f"{summary}\n\n"
             f"Sources:\n{source_lines}"
         )

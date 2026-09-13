@@ -185,6 +185,23 @@
     margin-top: 0.5rem;
     font-family: var(--font);
   }
+  .report-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  #downloadReportLink {
+    font-size: 0.78rem;
+    color: var(--accent);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    white-space: nowrap;
+  }
+  #downloadReportLink:hover { border-color: var(--accent); }
   #output .status-line { color: var(--muted); }
   #output .stage-line { color: var(--accent); font-weight: 600; }
   #output .error-line { color: var(--red); font-weight: 600; }
@@ -428,7 +445,10 @@
     </div>
 
     <div class="card">
-      <h2>3. Live Report</h2>
+      <div class="report-header">
+        <h2>3. Live Report</h2>
+        <a id="downloadReportLink" class="hidden" download="report.txt">&#8681; Download full report (.txt)</a>
+      </div>
       <div id="output"></div>
     </div>
 
@@ -454,6 +474,7 @@ const submitBtn = document.getElementById('submitBtn');
 const statusBar = document.getElementById('statusBar');
 const statusText = document.getElementById('statusText');
 const output = document.getElementById('output');
+const downloadReportLink = document.getElementById('downloadReportLink');
 const progressInfo = document.getElementById('progressInfo');
 const clearBtn = document.getElementById('clearBtn');
 const stopBtn = document.getElementById('stopBtn');
@@ -462,6 +483,34 @@ let selectedFile = null;
 let eventSource = null;
 let activitySource = null;
 let jobId = null;
+let reportBlobUrl = null;
+
+// Show only the "# Clinical Conclusion" section (sections 1-5, including
+// any inline "[COMPLETENESS CHECK ...]" addendum final_conclusion.py inserts
+// right before section 3 when it mechanically restores a dropped causative
+// finding) instead of the full multi-thousand-line report in the output
+// window. The full report is still available in full via the download link.
+function extractClinicalConclusion(fullText) {
+  if (!fullText) return fullText;
+  const startIdx = fullText.indexOf('# Clinical Conclusion');
+  if (startIdx === -1) return fullText; // unexpected format — show everything rather than nothing
+  let section = fullText.slice(startIdx);
+  // Cut at the next "---" appendix-section break (e.g. before "## Variants
+  // not included in conclusion" or "ACTIONABLE VARIANTS (ACMG SF)") — the
+  // Clinical Conclusion's own sections 1-5 never contain a bare "---" line.
+  const cut = section.match(/\n-{3,}\s*\n/);
+  if (cut) section = section.slice(0, cut.index);
+  return section.trim();
+}
+
+function showFullReportDownload(fullText, id) {
+  if (reportBlobUrl) URL.revokeObjectURL(reportBlobUrl);
+  const blob = new Blob([fullText], { type: 'text/plain' });
+  reportBlobUrl = URL.createObjectURL(blob);
+  downloadReportLink.href = reportBlobUrl;
+  downloadReportLink.download = `report_${id || 'result'}.txt`;
+  downloadReportLink.classList.remove('hidden');
+}
 
 // ── Job persistence across refresh ──
 function saveJob(id) { try { localStorage.setItem('sqwen_job_id', id); } catch(_) {} }
@@ -616,6 +665,7 @@ async function submitJob() {
   setStatus('running', 'Submitting job...');
   submitBtn.disabled = true;
   output.innerHTML = '';
+  downloadReportLink.classList.add('hidden');
   progressInfo.classList.add('hidden');
 
   const form = new FormData();
@@ -666,7 +716,8 @@ function startSSE(id) {
           setStatus('done', 'Analysis complete.');
           if (data.result) {
             output.innerHTML = '';
-            appendLine('result-line', data.result);
+            appendLine('result-line', extractClinicalConclusion(data.result));
+            showFullReportDownload(data.result, id);
           }
           clearJob();
           eventSource.close();
@@ -726,7 +777,8 @@ function handleEvent(data) {
     case 'result':
       setStatus('done', 'Analysis complete!');
       output.innerHTML = '';
-      appendLine('result-line', data.data);
+      appendLine('result-line', extractClinicalConclusion(data.data));
+      showFullReportDownload(data.data, jobId);
       stopBtn.classList.add('hidden');
       clearBtn.classList.remove('hidden');
       showChatPanel();
@@ -795,6 +847,8 @@ function resetUI() {
   fileName.textContent = '';
   phenotype.value = '';
   output.innerHTML = '';
+  downloadReportLink.classList.add('hidden');
+  if (reportBlobUrl) { URL.revokeObjectURL(reportBlobUrl); reportBlobUrl = null; }
   progressInfo.classList.add('hidden');
   stopBtn.classList.add('hidden');
   clearBtn.classList.add('hidden');
@@ -909,7 +963,10 @@ async function sendChat() {
     if (data.status === 'done') {
       jobId = saved;
       setStatus('done', 'Analysis complete (restored).');
-      if (data.result) appendLine('result-line', data.result);
+      if (data.result) {
+        appendLine('result-line', extractClinicalConclusion(data.result));
+        showFullReportDownload(data.result, saved);
+      }
       clearBtn.classList.remove('hidden');
       showChatPanel();
       clearJob();

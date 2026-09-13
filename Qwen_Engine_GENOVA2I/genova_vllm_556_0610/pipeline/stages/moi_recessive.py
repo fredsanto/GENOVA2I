@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference, append_clinvar_references
 from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
+from pipeline.core.acmg_bs2_recessive import validate_bs2_homozygous_unaffected_parent
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -285,6 +286,12 @@ def run_solo(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_RECESSIVE_SOLO,
     )
+    # Mechanical DEFAULT-UNAFFECTED-POLICY BS2 check, before recompute so the
+    # inserted bullet gets folded into the Base/Total point lines below — the
+    # prompt already neutralizes PM3 for a homozygous-parent discordance but
+    # never applies the BS2 penalty that discordance itself is evidence for.
+    # See validate_bs2_homozygous_unaffected_parent's docstring.
+    result = validate_bs2_homozygous_unaffected_parent(result, variant_base_conclusion, segregation)
     # Re-sum each variant's copied-verbatim base criteria against its own
     # "Base ACMG points" line before relabeling — catches a base conclusion
     # that already stated a wrong total (see acmg_points.recompute_and_fix_totals).

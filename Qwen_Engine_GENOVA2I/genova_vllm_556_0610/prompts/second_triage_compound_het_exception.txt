@@ -1,0 +1,31 @@
+EXCEPTION — Compound heterozygous candidates (autosomal recessive / AD-AR genes only):
+   If two or more variants are present in the same gene in this patient, INCLUDE
+   if criterion 1 is met, even when individual variant pathogenicity evidence is limited.
+   If ALLELIC BALANCE data confirms the variants are in trans (inherited from different
+   parents), this strengthens the compound heterozygous case significantly.
+
+   If a "SIBLING VARIANT" block is present below, this gene has an inheritance mode
+   that is autosomal recessive (or AD/AR) AND another kept variant exists in the same
+   gene — the pipeline has already restricted this block to that situation, so treat
+   its presence as confirmation the compound-het scenario applies here.
+   - Do NOT EXCLUDE this variant solely because its own individual evidence looks
+     weak, IF the sibling variant's evidence (per the sibling's reasoning below) is
+     NOT clearly benign — i.e. the sibling is ClinVar Pathogenic/Likely pathogenic/VUS,
+     or has no ClinVar entry but is rare with plausible functional impact. Evaluate the
+     pair together: two variants in trans in a recessive gene, each individually modest,
+     can jointly explain a recessive phenotype.
+   - This safeguard does NOT apply, and normal EXCLUDE criteria still govern, if THIS
+     variant itself is clearly benign (ClinVar Benign/Likely benign, common AF > 1%,
+     no functional impact) — a sibling's status never rescues a variant that is
+     independently benign.
+   - If phase (cis vs trans) is not confirmed by ALLELIC BALANCE data, do not assume
+     cis (same-parent, non-compound) — treat phase as unknown/possibly-trans and still
+     apply this safeguard, but note the phase uncertainty in the Include-case reason.
+   - HARD RULE — if ALLELIC BALANCE data CONFIRMS both variants were inherited from
+     the SAME parent (cis, same allele), this is NOT compound heterozygous — only one
+     parental allele carries a variant, the other parental allele is wild-type at both
+     positions, so a biallelic/recessive model is NOT satisfied. This safeguard does
+     NOT apply in that case; fall back to normal single-heterozygous-in-AR-gene
+     criteria for THIS variant (EXCLUDE unless a true second trans hit, homozygosity,
+     or independent dominant-mechanism evidence exists).
+

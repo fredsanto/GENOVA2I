@@ -11,16 +11,30 @@ _POINTS_LINE_RE = re.compile(
     r"(\*\*(?:Total )?ACMG points:\*\*\s*)([-+]?\d+(?:\.\d+)?)(\s*→\s*)([A-Za-z /()]+)"
 )
 
-# moi_*.py's "**Base ACMG points:** N -> Label" line (the copied-verbatim
-# base total, before that layer's own delta) — a third total-line format
-# alongside _POINTS_LINE_RE ("ACMG points:"/"Total ACMG points:") and
+# moi_*.py's "**Base ACMG points:** N" line (the copied-verbatim base total,
+# before that layer's own delta) — a third total-line format alongside
+# _POINTS_LINE_RE ("ACMG points:"/"Total ACMG points:") and
 # _CLASSIFICATION_LINE_RE below ("ACMG classification:"). Kept separate from
 # _POINTS_LINE_RE (rather than making "Total" one of several optional
 # prefixes) so adjust_points_line()/relabel_all_points_lines() — used
 # elsewhere against the "Total" total specifically — don't start matching
 # the "Base" line too.
+#
+# The trailing "→ Label" is OPTIONAL here, unlike _POINTS_LINE_RE, because
+# every moi_*.py prompt template (moi_dominant.txt, moi_recessive.txt,
+# moi_denovo.txt, moi_xlinked.txt, moi_recessive_homozygous.txt) explicitly
+# instructs this line as a bare copied number with no label — "**Base ACMG
+# points:** [copy the numeric value ... verbatim]" — never "N → Label". A
+# real, significant observed failure: this regex previously REQUIRED the
+# arrow+label suffix, so it silently never matched the Base line's actual
+# real-world shape in ANY MOI layer block, meaning recompute_and_fix_totals's
+# Base-line correction (first pass, below) and its Total-line reconciliation
+# (second pass, which depends on successfully matching the Base line to read
+# its value) both silently no-op'd for every single moi_*.py block ever
+# generated — the mechanical arithmetic safety net this function exists to
+# provide was never actually running for MOI-layer totals at all.
 _BASE_POINTS_LINE_RE = re.compile(
-    r"(\*\*Base ACMG points:\*\*\s*)([-+]?\d+(?:\.\d+)?)(\s*→\s*)([A-Za-z /()]+)"
+    r"(\*\*Base ACMG points:\*\*\s*)([-+]?\d+(?:\.\d+)?)(\s*→\s*[A-Za-z /()]+)?"
 )
 
 # final_conclusion.py's per-variant format: "**ACMG classification:** Label
@@ -41,7 +55,14 @@ _CRITERION_TAG_RE = re.compile(r"\[[A-Za-z\s]+,\s*([+-]?\d+(?:\.\d+)?)\s*(?:pts?
 # "**De novo delta:** +4" / "**X-linked delta:** +1" — sits between a
 # "**Base ACMG points:**" line and the "**Total ACMG points:**" line that
 # should equal their sum.
-_DELTA_LINE_RE = re.compile(r"\*\*[A-Za-z-]+ delta:\*\*\s*([+-]?\d+(?:\.\d+)?)")
+#
+# The label character class must allow an internal space (e.g. "De novo") —
+# a real observed failure: [A-Za-z-]+ cannot span "De novo" (two words), so
+# this regex silently never matched the De Novo layer's own delta line —
+# the most common layer — and the Base+delta reconciliation pass below that
+# depends on this match (see recompute_and_fix_totals) silently no-op'd for
+# every De Novo layer block, leaving a stale/wrong stated Total uncorrected.
+_DELTA_LINE_RE = re.compile(r"\*\*[A-Za-z][A-Za-z -]* delta:\*\*\s*([+-]?\d+(?:\.\d+)?)")
 
 # (inclusive lower bound, label) — highest first; matches the thresholds
 # block at the bottom of prompts/conclusion.txt.
@@ -158,7 +179,7 @@ def recompute_and_fix_totals(text: str) -> str:
         return total if found_any else None
 
     for i, line in enumerate(lines):
-        m = _POINTS_LINE_RE.search(line) or _BASE_POINTS_LINE_RE.search(line)
+        m = _POINTS_LINE_RE.search(line)
         if m:
             actual = _sum_preceding_criteria(i)
             if actual is not None and actual != float(m.group(2)):
@@ -166,6 +187,22 @@ def recompute_and_fix_totals(text: str) -> str:
                     line[: m.start()]
                     + f"{m.group(1)}{_sum_str(actual)}{m.group(3)}{classify(actual)}"
                     + line[m.end() :]
+                )
+            continue
+        mb = _BASE_POINTS_LINE_RE.search(line)
+        if mb:
+            actual = _sum_preceding_criteria(i)
+            if actual is not None and actual != float(mb.group(2)):
+                # Normalize to "N → Label" on correction regardless of
+                # whether the original line had a label at all (the real
+                # template format never does) — always write a fresh,
+                # correct one once a correction fires; leave untouched
+                # (bare or labeled, whichever it already was) when no
+                # correction is needed.
+                lines[i] = (
+                    line[: mb.start()]
+                    + f"{mb.group(1)}{_sum_str(actual)} → {classify(actual)}"
+                    + line[mb.end() :]
                 )
             continue
         m2 = _CLASSIFICATION_LINE_RE.search(line)

@@ -20,13 +20,18 @@ its own layer block (zygosity, inheritance, gene-disease evidence, ClinVar
 status, etc.).
 
 STEP 0 — LAYER SUMMARY (mandatory, do this first): for each MOI layer present
-above with at least one finding, name the layer and, in one sentence, state
-its top finding (strongest classification, gene, variant). A patient can have
-genuinely independently-explanatory findings under different mechanisms —
-e.g. a de novo dominant finding in one gene AND a separate compound-het
-recessive finding in a different gene are BOTH real diagnoses, not
-competitors. Do not force a single winner across layers unless one layer's
-findings clearly subsume or invalidate another's.
+above, list EVERY variant in that layer whose own block total is >= 6 points
+(Likely Pathogenic or Pathogenic) — not just the single highest-scoring one.
+A layer with three qualifying variants gets three named here, each with its
+gene, variant, and score; do not truncate to a "top finding" and drop the
+rest, even if one clearly outscores the others. A patient can have genuinely
+independently-explanatory findings under different mechanisms, and multiple
+independently-explanatory findings within the SAME layer — e.g. two separate
+de novo pathogenic variants in two different genes are BOTH real diagnoses,
+not competitors, and neither is dropped for scoring lower than the other. Do
+not force a single winner within or across layers unless one finding's own
+block clearly subsumes or invalidates another's (stated in that block's own
+text, not inferred from score alone).
 
 STEP 1 — PHASE CHECK (mandatory, defense-in-depth): a RECESSIVE layer block
 already states its own "**Phase:**" line (TRANS confirmed or UNKNOWN — this
@@ -74,6 +79,34 @@ establish a biallelic diagnosis; the weak/VUS partner means the second hit
 required for a recessive mechanism is not confirmed. In that case, mention
 the pair only under section 4 (Notable VUS) if either variant's own total is
 >= 4 and < 6 points, per the normal VUS rule.
+
+HYPOTHESIS-PM3 QUALIFIER MUST PROPAGATE (mandatory, applies to a RECESSIVE
+layer block whose Phase line reads "UNKNOWN" and whose PM3 was applied as a
+hypothesis rather than confirmed — check each variant's own "Recessive
+criteria applied:" line for the substring "hypothesis"): a compound-het pair
+built this way is a WORKING HYPOTHESIS pending trans-phase confirmation, not
+a confirmed diagnosis, even when the block's own "Joint compound-het
+classification" line reads CAUSATIVE and even when each variant's own "Total
+ACMG points" line resolves to a bare "Pathogenic"/"Likely Pathogenic" label —
+those bare labels describe the point math only, not the certainty of the
+finding, and the hypothesis nature does not disappear just because the
+points clear the threshold. When writing section 2 (and the Summary in
+section 5), you MUST: (a) prefix the classification with "Potential" for
+both variants (e.g. "Potential Pathogenic", "Potential Likely Pathogenic")
+instead of the bare label copied from the block; (b) state explicitly that
+the compound-heterozygous call rests on an unconfirmed trans phase and
+requires segregation/phasing testing to confirm, carrying forward the
+block's own "**Recommendation:**" line rather than omitting it; (c) do NOT
+write "CAUSATIVE" as a bare, unqualified verdict for this pair — write
+"potentially causative, pending phase confirmation" or equivalent. Do not
+reason your way past the UNKNOWN phase label by treating the presence of a
+CAUSATIVE verdict or a passing point total as proof the hypothesis has
+already been confirmed — an UNKNOWN phase that a downstream block chose to
+score under a documented hypothesis-testing exception is still, factually,
+an unconfirmed phase, and the reader of this report needs that caveat
+undiluted. This rule does not apply when the RECESSIVE block's Phase line
+reads "TRANS confirmed" — that is a firm finding and takes the bare labels
+normally.
 
 SCORE-SOURCE CHECK FOR DUAL-MODE GENES (mandatory, applies when a gene has a
 CAUSATIVE compound-het RECESSIVE block AND separate De Novo/Dominant-Inherited
@@ -153,13 +186,41 @@ surprising, state that once in one sentence and move on — never re-sum it.
   diagnosis), and do not present the X-linked layer's lower classification as
   a separate, competing finding.
 
-SINGLE-HIT RECESSIVE CHECK (defense-in-depth): if any UNCLASSIFIED block (or
-any layer block outside RECESSIVE) describes a heterozygous variant in a
-known AR/XLR gene with no second variant/trans partner mentioned as
-causative, do NOT list it as causative on its own — this should already have
-been excluded upstream (base layer's RECESSIVE SINGLE-HIT CHECK, and Layer
-5's Python TRANS gate never producing a block for it), but if one slipped
-through, exclude it here and state why.
+SINGLE-HIT RECESSIVE CHECK (defense-in-depth, and an EXPLICIT EXCEPTION to
+the CAUSATIVE THRESHOLD RULE above — check this BEFORE trusting any block's
+own >=6-point total): if any UNCLASSIFIED block (or any layer block outside
+RECESSIVE) describes a heterozygous variant in a known AR/XLR gene with no
+second variant/trans partner mentioned as causative, this variant is NEVER
+causative, regardless of what ACMG points total or classification label that
+block itself states — a het single-hit in a purely recessive gene cannot
+produce a fully recessive phenotype no matter how many points its own
+molecular criteria (PVS1, PM2, etc.) add up to. This should already have
+been excluded upstream (base layer's RECESSIVE SINGLE-HIT CHECK, capped to
+VUS there; Layer 5's Python TRANS gate never producing a RECESSIVE block for
+it) — but do not assume that upstream check fired correctly just because
+this synthesis prompt exists to catch it if it didn't. A real past failure:
+a block for a heterozygous variant in an AR-only gene stated in its own
+Comment "this finding alone is insufficient to confirm a diagnosis... without
+a compound heterozygous or homozygous partner variant" one line below its own
+"ACMG points: 11 → Pathogenic" line — and that Pathogenic label, not the
+Comment next to it, was what got carried into section 2 as a causative
+finding. Do not repeat this: for every variant you are about to list in
+section 2, explicitly check its own zygosity and gene inheritance mode
+(stated in its layer block) before trusting its classification label — a
+"Pathogenic"/"Likely Pathogenic" label attached to a lone heterozygous
+finding in an AR/XLR gene is wrong by construction and must be excluded here
+regardless of its stated point total, with a one-sentence note why.
+
+This check applies to a DE NOVO layer block exactly as much as any other —
+PS2/confirmed de novo status is not an exception. De novo only tells you
+where the single allele came from, not how many alleles are present; a
+heterozygous de novo variant in an AR/XLR gene is still one allele, and an
+AR/XLR condition still needs two. If a block's own text describes the gene
+as dominant, or as having a dominant mechanism, in order to admit a variant
+that an earlier layer/backend determination had already called AR/XLR, treat
+that as the block reasoning incorrectly, not as grounds for inclusion — the
+gene's inheritance mode is a fact about the gene, not something a single
+block gets to redefine per variant to clear this check.
 
 SCOPE RULE (mandatory — applies to the entire # Clinical Conclusion section
 below): the ONLY variants that may be named anywhere in this section are:
@@ -327,6 +388,22 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    must appear in this list whenever that layer's total is the one being
    reported.
 
+   A third real past failure, the mirror image of the second one above — a
+   BASE criterion dropped, not a layer-added one: a RECESSIVE layer block's
+   base conclusion listed several base criteria including one Strong-weight
+   criterion citing a specific ClinVar precedent variant, plus the layer's
+   own reduced-weight PM3 delta; the block's own base-plus-delta arithmetic
+   was correct and matched its own stated total. The final report's printed
+   criteria list carried over every OTHER base criterion and the PM3 delta,
+   but dropped that one Strong-weight base criterion entirely — while still
+   printing the block's original, correct total — so the visible list's own
+   sum fell well short of the stated total with no explanation for the gap.
+   Every criterion in the source block's list must be copied, base and
+   layer-added alike — not just whichever ones are convenient to remember
+   when compressing the block into this section's shorter format; a missing
+   BASE criterion breaks the same before-you-write-the-total arithmetic
+   check as a missing layer-added one.
+
    Then, on its own line, after the criteria list above:
    **ACMG classification:** [classification] ([N] pts
    total — the layer's own "Total ACMG points" value).
@@ -372,7 +449,24 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    itself is Likely Pathogenic and belongs in section 2, not here)
    AND a classification of "Uncertain significance" / "VUS". List each as [GENE]
    ([HGVS]) — [N] pts, with a one-sentence justification copied from that
-   variant's own criteria list. If that variant's own layer/base block's
+   variant's own criteria list.
+
+   VARIANT IDENTITY CHECK APPLIES HERE TOO, NOT ONLY IN SECTION 2: the same
+   character-for-character HGVS-copying rule from section 2 applies to every
+   entry in this section — copy each gene's own HGVS from its own block's
+   header line, never from memory or from a different gene's entry sitting
+   nearby in this same list. A real past failure: when compressing several
+   Notable VUS entries into this section's one-line-per-gene format, one
+   gene's own protein-change notation was pasted onto two OTHER, unrelated
+   genes' entries in the same list, each of which had its own distinct HGVS
+   in its own block on a completely different chromosome. Compressing
+   multiple entries into a short list is exactly
+   where identity bleed between adjacent entries happens — check each
+   entry's HGVS against its own source block individually before finalizing
+   this section, not against whatever HGVS you most recently wrote for the
+   entry above it.
+
+   If that variant's own layer/base block's
    **ClinVar:** line states a review status/star rating and/or a
    per-submission tally (Pathogenic/Likely pathogenic/Uncertain
    significance/Likely benign/Benign counts), append them too — e.g. "...;

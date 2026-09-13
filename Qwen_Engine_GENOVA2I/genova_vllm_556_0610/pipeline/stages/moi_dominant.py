@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference
 from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
+from pipeline.core.acmg_bs2_dominant import validate_bs2_unaffected_dominant_carrier
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -97,6 +98,10 @@ def run_one(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_DOMINANT,
     )
+    # Mechanical DEFAULT-UNAFFECTED-POLICY BS2 check, before recompute so the
+    # inserted bullet gets folded into the Base/Total point lines below —
+    # see validate_bs2_unaffected_dominant_carrier's docstring.
+    result = validate_bs2_unaffected_dominant_carrier(result, base_conclusion, segregation)
     result = recompute_and_fix_totals(result)
     result = relabel_all_points_lines(result)
     full_context = variant_context + "\n" + base_conclusion

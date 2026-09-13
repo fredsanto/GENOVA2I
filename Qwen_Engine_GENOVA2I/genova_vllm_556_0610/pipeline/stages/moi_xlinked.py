@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference
 from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
+from pipeline.core.acmg_bs2_dominant import validate_bs2_unaffected_dominant_carrier
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -51,6 +52,7 @@ def run_one(
     variant_context: str,
     base_conclusion: str,
     xlinked_pattern: str,
+    segregation: str,
     llm: "LLMClient",
 ) -> str:
     """
@@ -60,6 +62,11 @@ def run_one(
         variant_context:  Per-variant context string from retrieval.
         base_conclusion:  Layer 2's full structured output for this variant.
         xlinked_pattern:  classify_xlinked_ab() result — "XLR" / "XLD" / "uncertain".
+        segregation:      classify_segregation() result ("maternal" / "paternal" /
+                           "de_novo" / etc.) — used only to gate the mechanical
+                           BS2 unaffected-carrier check below, XLD only (an
+                           unaffected heterozygous carrier mother is the expected,
+                           uninformative finding for XLR and must not trigger it).
         llm:               Shared LLMClient instance.
 
     Returns:
@@ -80,6 +87,13 @@ def run_one(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_XLINKED,
     )
+    if xlinked_pattern == "XLD":
+        # Same unaffected-carrier BS2 gap as moi_dominant.py/moi_denovo.py: a
+        # fully-penetrant XLD variant inherited from a mother not stated as
+        # affected is Strong Benign evidence, same DEFAULT-UNAFFECTED POLICY.
+        # XLR is excluded (see run_one's docstring) — a heterozygous unaffected
+        # carrier mother is the expected, uninformative finding there.
+        result = validate_bs2_unaffected_dominant_carrier(result, base_conclusion, segregation)
     result = recompute_and_fix_totals(result)
     result = relabel_all_points_lines(result)
     full_context = variant_context + "\n" + base_conclusion

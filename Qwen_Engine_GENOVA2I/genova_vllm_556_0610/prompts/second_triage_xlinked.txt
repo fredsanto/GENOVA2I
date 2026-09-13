@@ -1,0 +1,75 @@
+
+     X-LINKED GENES SPECIFICALLY — this EXCLUDE rule may ONLY be invoked for
+     an X-linked gene when its mode is CONFIRMED XLR with no XLD component
+     reported anywhere in the evidence. If the "Gene inheritance mode" field
+     is XLD, XLD_XLR (dual), or unresolved/unknown/NA (no explicit mode
+     stated) — which is the common case, since most input data does not carry
+     a confirmed inheritance-mode call — do NOT exclude a heterozygous
+     X-linked variant with reasoning like "single het in X-linked gene; no
+     dominant inheritance or de novo status" or "insufficient for hemizygous
+     disease." A downstream specialized module (X-LINKED MOI ANALYSIS) exists
+     specifically to weigh XLD-vs-XLR, female heterozygous causation, and
+     parental cosegregation for X-linked variants — it never runs on a variant
+     this stage has already EXCLUDEd. Pre-empting it here with an uncertain-
+     mode gene throws away a case that module is built to resolve.
+
+HARD GATE — READ THE GENE INHERITANCE MODE BEFORE APPLYING ANY X-LINKED
+"SINGLE HET / NO SECOND HIT / NO HEMIZYGOSITY" EXCLUDE REASONING:
+   Check the "Gene inheritance mode" value as stated by the backend block /
+   reasoning summary table above for this gene.
+   - A bare "X-linked" or "XL" mode — with NO explicit "recessive" or "XLR"
+     qualifier attached by the backend itself — is CATEGORICALLY NOT the same
+     as "confirmed XLR". Treat it exactly like AD_AR/XLD_XLR dual-mode: it
+     does NOT satisfy this EXCLUDE rule's "ONLY reported mode is recessive"
+     condition, so the rule CANNOT fire. This holds even if the gene is
+     textbook-associated with a recessive-sounding disease name (e.g. "X-linked
+     retinitis pigmentosa") or the phenotype predominantly affects males in
+     the general population — neither is the same as this specific backend
+     call stating confirmed recessive-only inheritance for this case.
+   - Do NOT let the reasoning stage's own prose override this check: if the
+     reasoning text above asserts "X-linked recessive" as a bare conclusion
+     but the "Gene inheritance mode" row/backend block itself only ever says
+     "X-linked" with no R/D qualifier, the backend block's literal value
+     governs this gate, not the prose gloss layered on top of it.
+   - Only when the mode is explicitly and exclusively "XLR" (X-linked
+     recessive), stated as such by the backend, with no XLD/XLD_XLR/unknown
+     qualifier anywhere in the evidence, may this EXCLUDE rule fire on
+     zygosity/second-hit grounds for an X-linked gene.
+   - If this gate blocks the rule, do not write an exclude-case that mentions
+     zygosity, hemizygosity, or a second hit for this variant — evaluate the
+     variant on gene-phenotype link and pathogenicity evidence instead, and
+     let it proceed to the X-LINKED MOI ANALYSIS module.
+
+     A real past failure to not repeat: a heterozygous nonsense variant in
+     an X-linked gene, already ClinVar-classified Likely pathogenic with a
+     high CADD score, was EXCLUDEd with "single heterozygous call in
+     X-linked gene without confirmed hemizygosity or second hit" — while the
+     evidence gathered in that SAME reasoning pass explicitly stated
+     "Inheritance mode (CSV/CGD): X-linked (recessive/dominant not specified
+     in available evidence)" and left the summary table's own "Gene
+     inheritance mode" row blank. The mode was not merely uncertain in a
+     vague sense — the evidence directly in front of the model said, in
+     words, that recessive-vs-dominant was unresolved, which is precisely
+     the condition this rule already names as disqualifying the EXCLUDE.
+     Excluding anyway, on a zygosity technicality, discarded an already-
+     ClinVar-pathogenic finding and prevented it from ever reaching the
+     X-LINKED MOI ANALYSIS module built to weigh exactly this scenario
+     (manifesting heterozygous females, XLD/XLR ambiguity).
+
+     A second real past failure, same rule, different route: an X-linked gene
+     commonly described in textbooks as causing an X-linked recessive
+     condition — raw input carried only "Inheritance=XL" (bare, no R/D
+     qualifier). The reasoning stage nonetheless asserted "the disease
+     mechanism is X-linked recessive, consistent with... the predominance of
+     the phenotype in males" — a plausible-sounding but ungrounded gloss, not
+     something the backend mode block actually stated. Second triage then
+     treated that gloss as "confirmed XLR" and EXCLUDEd with "single het in
+     XLR gene without second hit or de novo proof" — even though this gene
+     is one where heterozygous female carriers are well documented to
+     manifest disease via skewed X-inactivation. Before applying this EXCLUDE ground
+     to any X-linked gene, re-read the evidence's own literal, backend-stated
+     inheritance mode value — if it is anything other than an explicit,
+     unqualified "XLR"/"X-linked recessive" AS STATED BY THE BACKEND ITSELF
+     (not inferred from gene-disease textbook knowledge, phenotype sex
+     skew, or the reasoning stage's own prose), this ground does not apply,
+     full stop, regardless of how the zygosity looks in isolation, OR

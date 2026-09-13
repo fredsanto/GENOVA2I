@@ -208,6 +208,40 @@ def _clean_transcript_hgvs(raw: str) -> str:
     return f"{m.group(1)}:{m.group(2)}"
 
 
+_TRANSCRIPT_ACCESSION_RE = re.compile(r"(N[MR]_\d+|ENST\d+)")
+
+
+def _transcript_base(hgvs_or_accession: str) -> str:
+    """Bare transcript accession with version stripped, e.g. 'NM_001034853.3' or
+    'NM_001034853.3:c.123A>T' -> 'NM_001034853'. Returns "" if none found."""
+    if not hgvs_or_accession:
+        return ""
+    m = _TRANSCRIPT_ACCESSION_RE.search(hgvs_or_accession)
+    return m.group(1) if m else ""
+
+
+def _is_transcript_mismatch(queried_hgvs: str, returned_chgvs: str | None) -> bool:
+    """
+    True when AutoPVS1's returned cHGVS is pinned to a materially different
+    transcript than the one we queried (version suffix ignored).
+
+    Some genes (RPGR is the canonical example) have multiple RefSeq transcripts
+    with divergent exon/intron structure in a hotspot region (RPGR's ORF15,
+    present in NM_001034853 but absent/renumbered in the "canonical" NM_000328).
+    AutoPVS1's /search endpoint can silently resolve a query against the wrong
+    one of these and return exon/intron boundaries that do not correspond to the
+    transcript actually reported in the input data — e.g. a query against
+    NM_001034853's ORF15 exon 15 came back as "NM_000328.3:c.1905+331_1905+332del
+    (Intron)", which is a real position on a different transcript, not evidence
+    that the queried variant is intronic. Silently trusting the gene-level match
+    (RPGR == RPGR) alone is not enough cross-validation; the transcript accession
+    itself must also match.
+    """
+    queried = _transcript_base(queried_hgvs)
+    returned = _transcript_base(returned_chgvs or "")
+    return bool(queried and returned and queried != returned)
+
+
 def _is_intergenic_result(d: dict) -> bool:
     """True when AutoPVS1 returned an intergenic hit or no gene — unusable result."""
     return (d.get("variant_type") or "").lower() == "intergenic" or d.get("gene") is None
@@ -403,6 +437,14 @@ def fetch_and_format_autopvs1(
                 logger.warning(
                     "[AutoPVS1] HGVS search returned intergenic for %s — discarding",
                     hgvs_clean,
+                )
+                d = None
+            elif _is_transcript_mismatch(hgvs_clean, d.get("chgvs")):
+                logger.warning(
+                    "[AutoPVS1] Transcript mismatch: queried %s, AutoPVS1 resolved "
+                    "against %s — discarding HGVS-search result, falling back to "
+                    "VCF coords",
+                    hgvs_clean, d.get("chgvs"),
                 )
                 d = None
             else:

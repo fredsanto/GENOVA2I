@@ -1,0 +1,49 @@
+
+     ANIMAL-MODEL-ONLY EVIDENCE COUNTS AS ABSENT: if every piece of retrieved
+     literature for this gene describes findings in mice, zebrafish, or other
+     non-human model organisms — with no human case report, no OMIM human
+     phenotype entry, no GeneReviews human clinical description, and no
+     ClinVar human-disease entry — this gene has NO established human
+     phenotype at all, and therefore no human-phenotype intersection with
+     this patient exists to evaluate: treat this exactly as "gene-phenotype
+     link absent" above and EXCLUDE, regardless of how mechanistically
+     compelling or LoF-intolerant the animal data makes the gene look. A gene
+     with only "X-knockout mice show phenotype Y" evidence is not yet a human
+     disease gene; do not pursue it as a candidate on animal evidence alone,
+     and do not let literature volume (multiple animal-model papers) read as
+     "strong phenotype match" — volume of non-human evidence is still zero
+     human evidence, OR
+
+     GWAS/ASSOCIATION-STUDY EVIDENCE ALSO COUNTS AS ABSENT, SAME AS ANIMAL-
+     MODEL-ONLY: a genome-wide association study (GWAS), a multi-gene risk-
+     locus panel, or any statistical common-variant-vs-common-disease
+     association is NOT a gene-disease causation link, no matter how
+     directly its stated topic overlaps this patient's phenotype. Recognize
+     this evidence shape by its own language, not by topic match: "one of N
+     genes associated with [condition]", "genetic risk factor/susceptibility
+     for [condition]", "polymorphism/SNP associated with increased incidence
+     of [condition]", "genetic architecture underlying [condition]", or a
+     named multi-SNP/multi-gene panel study. These describe a population-
+     level statistical correlation with a common, typically polygenic
+     condition — they do NOT establish that damaging variants in this
+     specific gene are a Mendelian cause of disease, which is what a
+     causative-variant call in a rare-disease pipeline requires. A real past
+     failure (illustrative — GENE_X standing in for whatever gene triggers
+     this pattern): GENE_X's literature consisted almost entirely of
+     cardiovascular/metabolic GWAS hits (coronary artery disease, stroke
+     risk), plus one study naming it "one of 11 genes associated with
+     [a condition resembling the patient's phenotype]" — a multi-gene
+     population-association study, not a monogenic disease-gene finding —
+     and this was accepted as a sufficient gene-phenotype link for a patient
+     with a generic presenting phenotype, producing a Pathogenic call for a
+     single heterozygous LoF variant in a gene gnomAD shows to be extremely
+     LoF-tolerant (pLI≈0) and for which AutoPVS1 itself reported no disease
+     mechanism ("Disease mech.: —", "Haploinsuff.: None"). Do not repeat
+     this: EXCLUDE when the only evidence for this gene is GWAS/association-
+     study in shape,
+     regardless of how compelling the gene name or a superficial topic match
+     looks. A genuine Mendelian gene-disease link instead looks like: a
+     GeneReviews/OMIM entry, a named syndrome, case reports of patients
+     carrying P/LP variants, or a stated inheritance mode (AD/AR/XL) for a
+     specific disease — look for that shape of evidence, not association-
+     study language, before treating a gene-phenotype link as established, OR

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference
 from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
+from pipeline.core.acmg_bs2_dominant import validate_bs2_unaffected_dominant_carrier
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -85,6 +86,13 @@ def run_one(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_DENOVO,
     )
+    # This layer also handles AD_AR-gene variants whose segregation resolves
+    # to genuinely inherited (maternal/paternal), not de novo — the same
+    # unaffected-carrier BS2 gap moi_dominant.py guards against applies here
+    # too, or this layer's copy of the base conclusion keeps an un-penalized
+    # score while the Dominant-Inherited layer (same variant) correctly
+    # applies it. See validate_bs2_unaffected_dominant_carrier's docstring.
+    result = validate_bs2_unaffected_dominant_carrier(result, base_conclusion, segregation)
     result = recompute_and_fix_totals(result)
     result = relabel_all_points_lines(result)
     full_context = variant_context + "\n" + base_conclusion

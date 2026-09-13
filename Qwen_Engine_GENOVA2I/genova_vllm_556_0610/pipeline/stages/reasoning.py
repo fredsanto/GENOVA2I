@@ -32,8 +32,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _REASONING_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "reasoning.txt"
+_GENE_PHENOTYPE_PROMPT_PATH = (
+    Path(__file__).parent.parent.parent / "prompts" / "gene_phenotype_extraction.txt"
+)
 _SCORING_PROMPT_PATH   = Path(__file__).parent.parent.parent / "prompts" / "second_triage.txt"
+_XLINKED_PROMPT_PATH   = Path(__file__).parent.parent.parent / "prompts" / "second_triage_xlinked.txt"
+_SINGLE_HIT_AR_PROMPT_PATH = (
+    Path(__file__).parent.parent.parent / "prompts" / "second_triage_single_hit_recessive.txt"
+)
+_COMPOUND_HET_PROMPT_PATH = (
+    Path(__file__).parent.parent.parent / "prompts" / "second_triage_compound_het_exception.txt"
+)
+_LIT_QUALITY_PROMPT_PATH = (
+    Path(__file__).parent.parent.parent / "prompts" / "second_triage_literature_evidence_quality.txt"
+)
 
+# Isolated gene-phenotype-extraction call — short, single-line output
+MAX_NEW_TOKENS_GENE_PHENOTYPE = 300
 # Call 1: step-by-step narrative — no score, citation-only rules apply
 MAX_NEW_TOKENS_REASONING = 1500
 # Call 2: three-line Include-case / Exclude-case / Decision block
@@ -44,14 +59,17 @@ _INCLUDE_CASE_RE = re.compile(r"Include-case:\s*(.+)", re.IGNORECASE)
 _EXCLUDE_CASE_RE = re.compile(r"Exclude-case:\s*(.+)", re.IGNORECASE)
 _DECISION_RE     = re.compile(r"Decision:\s*(INCLUDE|EXCLUDE)", re.IGNORECASE)
 _CLUSTER_MATCH_RE = re.compile(
-    r"PHENOTYPE CLUSTER MATCH:\s*(YES|PARTIAL|NO)", re.IGNORECASE
+    r"CLUSTER_PHENOTYPE:\s*(YES|PARTIAL|NONE|INCIDENTAL)", re.IGNORECASE
+)
+_PHENOTYPE_TAG_RE = re.compile(
+    r"^\s*PHENOTYPE:\s*(.+)$", re.IGNORECASE | re.MULTILINE
 )
 
 
 def parse_cluster_match(reasoning_text: str) -> str:
     """
-    Extract Stage 1's own "PHENOTYPE CLUSTER MATCH: YES|PARTIAL|NO" verdict from
-    its Phenotype fit step (see prompts/reasoning.txt).
+    Extract Stage 1's own "CLUSTER_PHENOTYPE: YES|PARTIAL|NONE|INCIDENTAL"
+    verdict from its Phenotype fit step (see prompts/reasoning.txt).
 
     This exists so the verdict can be re-stated to downstream stages
     (second_triage, conclusion) as a small labeled backend-determined fact —
@@ -61,11 +79,27 @@ def parse_cluster_match(reasoning_text: str) -> str:
     verbatim, is far more reliably followed than the same judgment buried in
     several paragraphs of prose and asked to be located again each time.
 
-    Returns "YES", "PARTIAL", "NO", or "UNKNOWN" if the line is missing
-    (e.g. the model dropped the label — treat as unknown, not as NO).
+    Returns "YES", "PARTIAL", "NONE", "INCIDENTAL", or "UNKNOWN" if the line is
+    missing (e.g. the model dropped the label — treat as unknown, not as NONE).
     """
     m = _CLUSTER_MATCH_RE.search(reasoning_text)
     return m.group(1).upper() if m else "UNKNOWN"
+
+
+def parse_phenotype_tag(reasoning_text: str) -> str:
+    """
+    Extract Stage 1's own "PHENOTYPE: <condition(s)>" tag — the gene's
+    retrieved condition/disease name(s), independent of whether they overlap
+    the patient (see prompts/reasoning.txt). Re-stated to downstream stages
+    the same way parse_cluster_match's verdict is, and reused verbatim as the
+    reported condition name when a variant is routed to Actionable/Incidental
+    findings (an INCIDENTAL cluster-match verdict) — never re-derived or
+    invented downstream.
+
+    Returns the tag's raw text, or "NA" if the line is missing.
+    """
+    m = _PHENOTYPE_TAG_RE.search(reasoning_text)
+    return m.group(1).strip() if m else "NA"
 
 
 # ── Prompt loaders ────────────────────────────────────────────────────────────
@@ -78,11 +112,136 @@ def _load_reasoning_prompt() -> str:
     )
 
 
+def _load_gene_phenotype_prompt() -> str:
+    if _GENE_PHENOTYPE_PROMPT_PATH.exists():
+        return _GENE_PHENOTYPE_PROMPT_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        f"Gene-phenotype-extraction prompt not found at {_GENE_PHENOTYPE_PROMPT_PATH}."
+    )
+
+
+def run_gene_phenotype_extraction(evidence_context: str, llm: "LLMClient") -> str:
+    """
+    Isolated SLM call: compiles this gene's complete retrieved condition list
+    from tool evidence ONLY (GeneReviews/OMIM/CGD/LitVar2/web-search/ClinVar
+    output already gathered for this variant) — patient_phenotype must never
+    be part of `evidence_context` (pipeline.py's _evidence_only_context strips
+    the PATIENT DATA header off the variant's context slice before calling
+    this) and is never mentioned in this call's own prompt either, so the
+    model has no way to conflate the two.
+
+    Real observed failure this fixes: a single combined call asked to both
+    compile a gene's condition list AND judge phenotype fit against the
+    patient (1) wrote the patient's own presenting complaint into the
+    condition-list tag instead of the gene's actual conditions, and
+    separately (2) omitted a well-documented, unrelated condition it was
+    actively discussing elsewhere in that same output — reliably, across
+    multiple attempts at tightening the combined prompt's wording. Never
+    showing this sub-task the patient at all removes the first failure
+    structurally and removes any incentive to filter the list down to
+    "what's relevant to this patient" for the second.
+
+    Returns the parsed "PHENOTYPE: <list>" tag content (see
+    parse_phenotype_tag), or "NA" if the model's output could not be parsed.
+    """
+    template = _load_gene_phenotype_prompt()
+    user_prompt = template.replace("{gene_evidence}", evidence_context)
+    result = llm.generate(
+        system=(
+            "You are compiling a gene's known condition list from the "
+            "evidence provided. You have not been given any patient "
+            "information and must not reference or assume any."
+        ),
+        user=user_prompt,
+        max_tokens=MAX_NEW_TOKENS_GENE_PHENOTYPE,
+    )
+    return parse_phenotype_tag(result)
+
+
 def _load_scoring_prompt() -> str:
     if _SCORING_PROMPT_PATH.exists():
         return _SCORING_PROMPT_PATH.read_text(encoding="utf-8")
     raise FileNotFoundError(
         f"Second-triage prompt not found at {_SCORING_PROMPT_PATH}."
+    )
+
+
+def _load_xlinked_block() -> str:
+    """
+    Conditional sub-prompt (see prompts/second_triage_xlinked.txt), spliced
+    into second_triage.txt's {xlinked_block} placeholder only when this
+    variant's gene is actually on chrX. Split out of the main prompt so that
+    the ~40-line X-linked-specific carve-out — biologically inapplicable to
+    the large majority of variants, which are autosomal — does not compete
+    for the model's attention on every single second-triage call. Conditional
+    prompt assembly, not a smaller/weaker rule: the full text is used
+    verbatim whenever it does apply.
+    """
+    if _XLINKED_PROMPT_PATH.exists():
+        return _XLINKED_PROMPT_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        f"X-linked second-triage sub-prompt not found at {_XLINKED_PROMPT_PATH}."
+    )
+
+
+def _load_single_hit_recessive_block() -> str:
+    """
+    Conditional sub-prompt (see prompts/second_triage_single_hit_recessive.txt):
+    the "single heterozygous variant in an AR/XLR-only gene is insufficient"
+    EXCLUDE ground, spliced into {single_hit_recessive_block} only when it
+    could actually apply — i.e. NOT when Zygosity is already confirmed
+    homozygous/hemizygous (the rule's own text says it can never fire then
+    anyway) and NOT when the gene's resolved mode is confirmed purely
+    dominant (AD/XLD, no recessive component at all, so the concern is moot
+    from the start). Included by default (see include_single_hit_recessive's
+    default in run_second_triage) so an uninitialized/legacy call site never
+    silently loses applicable content — unlike the X-linked block, which is
+    relevant only to a small minority of variants, this recessive-insufficiency
+    ground is relevant to most heterozygous variants in most genes, so the
+    safe default is to include it rather than omit it.
+    """
+    if _SINGLE_HIT_AR_PROMPT_PATH.exists():
+        return _SINGLE_HIT_AR_PROMPT_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        f"Single-hit-recessive second-triage sub-prompt not found at {_SINGLE_HIT_AR_PROMPT_PATH}."
+    )
+
+
+def _load_compound_het_exception_block() -> str:
+    """
+    Conditional sub-prompt (see prompts/second_triage_compound_het_exception.txt):
+    the compound-heterozygous EXCEPTION — spliced into
+    {compound_het_exception_block} only when sibling_context_block is
+    non-empty, i.e. a "SIBLING VARIANT" block actually exists for this
+    variant (the pipeline already restricts that to AR/AD-AR genes with >=2
+    kept variants — see pipeline.py's _sibling_block). Without a sibling
+    variant this whole exception has nothing to apply to. Included by
+    default so an un-updated call site never silently drops it.
+    """
+    if _COMPOUND_HET_PROMPT_PATH.exists():
+        return _COMPOUND_HET_PROMPT_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        f"Compound-het-exception second-triage sub-prompt not found at {_COMPOUND_HET_PROMPT_PATH}."
+    )
+
+
+def _load_literature_evidence_quality_block() -> str:
+    """
+    Conditional sub-prompt (see prompts/second_triage_literature_evidence_quality.txt):
+    the ANIMAL-MODEL-ONLY / GWAS-ASSOCIATION-STUDY evidence-shape sub-cases,
+    spliced into {literature_evidence_quality_block} only when literature
+    evidence was actually retrieved for this gene (litvar2_raw_by_variant[i]
+    is non-empty). With no literature retrieved at all, the outer "no
+    literature, no OMIM, no ClinVar disease entries" EXCLUDE ground already
+    covers the case on its own — these two sub-cases exist to judge the
+    SHAPE of literature that does exist, and have nothing to act on
+    otherwise. Included by default so an un-updated call site never
+    silently drops it.
+    """
+    if _LIT_QUALITY_PROMPT_PATH.exists():
+        return _LIT_QUALITY_PROMPT_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        f"Literature-evidence-quality second-triage sub-prompt not found at {_LIT_QUALITY_PROMPT_PATH}."
     )
 
 
@@ -154,6 +313,7 @@ def run_reasoning(
     llm: "LLMClient",
     sibling_context_block: str = "",
     inheritance_mode_block: str = "",
+    gene_phenotype_block: str = "",
 ) -> str:
     """
     Stage 2a — Call 1: step-by-step clinical reasoning grounded in cited evidence only.
@@ -180,6 +340,13 @@ def run_reasoning(
                                  XLD/XLR/unknown), stated as a fact so the model
                                  reports it in the summary table rather than
                                  re-deriving it from prose evidence.
+        gene_phenotype_block:    Backend-extracted gene condition list (see
+                                 run_gene_phenotype_extraction), computed by an
+                                 isolated call that never saw the patient's
+                                 phenotype — stated as a fact so this step only
+                                 has to compare it against the patient's
+                                 phenotype for the CLUSTER_PHENOTYPE verdict,
+                                 never author or edit the list itself.
 
     Returns:
         Step-by-step reasoning text.
@@ -191,6 +358,7 @@ def run_reasoning(
         .replace("{augmented_context}", variant_context)
         .replace("{sibling_context_block}", sibling_context_block)
         .replace("{inheritance_mode_block}", inheritance_mode_block)
+        .replace("{gene_phenotype_block}", gene_phenotype_block)
     )
 
     return llm.generate(
@@ -205,6 +373,10 @@ def run_second_triage(
     reasoning_text: str,
     llm: "LLMClient",
     sibling_context_block: str = "",
+    is_x_linked: bool = False,
+    include_single_hit_recessive: bool = True,
+    include_compound_het_exception: bool = True,
+    include_literature_evidence_quality: bool = True,
 ) -> str:
     """
     Stage 2b — Call 2: structured INCLUDE/EXCLUDE decision with justification.
@@ -218,6 +390,36 @@ def run_second_triage(
                                  with ≥2 kept variants) — lets second_triage apply
                                  the compound-het safeguard instead of judging this
                                  variant in isolation. Empty string when not applicable.
+        is_x_linked:             True when this variant's gene resolved to chrX
+                                 (moi.gene_chromosome(variants, [i]) == "X") —
+                                 splices in the X-LINKED GENES SPECIFICALLY
+                                 sub-prompt (prompts/second_triage_xlinked.txt)
+                                 only for genes it can actually apply to; a
+                                 hard biological fact, never a judgment call,
+                                 so this is conditional prompt assembly, not a
+                                 weakened rule for the autosomal majority.
+        include_single_hit_recessive: False only when Zygosity is already
+                                 confirmed homozygous/hemizygous, or the
+                                 gene's resolved mode is confirmed purely
+                                 dominant (AD/XLD) — both cases where the
+                                 "single het insufficient under a recessive
+                                 model" ground is structurally inapplicable.
+                                 Defaults True (include) so an un-updated or
+                                 future call site never silently drops a
+                                 ground that applies to most heterozygous
+                                 variants, unlike is_x_linked's minority-case
+                                 default of False.
+        include_compound_het_exception: False only when sibling_context_block
+                                 is empty (no sibling variant exists for this
+                                 gene) — the exception has nothing to apply to
+                                 in that case. Defaults True.
+        include_literature_evidence_quality: False only when no literature
+                                 evidence was retrieved at all for this gene —
+                                 the outer "gene-phenotype link absent"
+                                 EXCLUDE ground already covers that case, and
+                                 these evidence-SHAPE sub-cases have nothing
+                                 to characterize without literature to look
+                                 at. Defaults True.
 
     Returns:
         Combined text: step-by-step reasoning followed by the inclusion decision
@@ -225,12 +427,20 @@ def run_second_triage(
         REASONING display section in pipeline.py.
     """
     logger.info("[Reasoning] Call 2/2 — second_triage inclusion decision (INCLUDE/EXCLUDE)...")
-    scoring_template = _load_scoring_prompt()
+    scoring_template   = _load_scoring_prompt()
+    xlinked_block      = _load_xlinked_block() if is_x_linked else ""
+    single_hit_block   = _load_single_hit_recessive_block() if include_single_hit_recessive else ""
+    compound_het_block = _load_compound_het_exception_block() if include_compound_het_exception else ""
+    lit_quality_block  = _load_literature_evidence_quality_block() if include_literature_evidence_quality else ""
     scoring_user     = (
         scoring_template
         .replace("{augmented_context}", variant_context)
         .replace("{reasoning}", reasoning_text)
         .replace("{sibling_context_block}", sibling_context_block)
+        .replace("{compound_het_exception_block}", compound_het_block)
+        .replace("{literature_evidence_quality_block}", lit_quality_block)
+        .replace("{single_hit_recessive_block}", single_hit_block)
+        .replace("{xlinked_block}", xlinked_block)
     )
 
     decision_text = llm.generate(

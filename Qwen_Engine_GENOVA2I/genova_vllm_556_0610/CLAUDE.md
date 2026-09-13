@@ -933,6 +933,22 @@ These rules must be respected in all new code:
 10. **The server knows nothing about variants.** `server.py` parses the request,
     calls `pipeline.run()`, and returns the result. All logic is in `pipeline/`.
 
+11. **No real gene/variant identifiers in prompts — ever.** Prompts in `prompts/*.txt`
+    and any inline prompt text in `pipeline/tools/*.py` (e.g. `websearch_agent.py`'s
+    message builders) must never name a real gene symbol, real HGVS/protein notation,
+    real ClinVar Variation ID, or exact point value/arithmetic copied from an actual
+    evaluation case (the CHUV trio set or the singleton visual-impairment set). This
+    applies to "a real past failure" worked examples too — describe the *shape* of the
+    failure generically (e.g. "GENE_X", "a dominant-relevant gene", "c.100A>C",
+    "cluster A ... cluster B") instead of the real identifiers from the debugging
+    session that found it. Baking a real gene/variant into a prompt is training the
+    pipeline on its own eval set — it fixes that one case while overfitting the model's
+    attention to a name it will pattern-match on, not the general rule. Before
+    finalizing any prompt edit, grep the new text for gene symbols and exact numbers
+    pulled from the current session's actual report output, every time — this has
+    already slipped through unnoticed more than once. See project memory
+    `feedback_no_test_data_in_prompts`.
+
 ---
 
 ## Dependencies

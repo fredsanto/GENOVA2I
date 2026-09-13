@@ -34,7 +34,10 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
-MAX_WORKERS          = 32   # retrieval (network tools, I/O bound)
+MAX_WORKERS          = 64   # first_triage (vLLM calls, runs across all variants) —
+                             # raised from 32 to test whether this all-variant stage,
+                             # not reasoning/conclusion's smaller kept-variant pool, is
+                             # the actual bottleneck
 MAX_WORKERS_LLM      = 16   # reasoning/conclusion (vLLM calls, GPU-bound)
 
 from pipeline.config          import (
@@ -43,6 +46,7 @@ from pipeline.config          import (
 )
 from pipeline.core.manifest  import ManifestLoader
 from pipeline.core.executor  import Executor
+from pipeline.core.context   import ToolContext
 from pipeline.core.normalizer import TARGET_COLUMNS
 from pipeline.core            import moi
 from pipeline.core            import segregation
@@ -147,12 +151,6 @@ def _classification_rank(conclusion_text: str) -> int:
         if key in label:
             return rank
     return len(_ACMG_CLASSIFICATION_RANK) + 1
-
-
-def _extract_classification_label(conclusion_text: str) -> str | None:
-    """The classification name off a conclusion's 'ACMG points: N → Classification' line."""
-    m = _ACMG_POINTS_LINE_RE.search(conclusion_text)
-    return m.group(1).strip() if m else None
 
 
 _LOF_HGVS_CLUES = ("fs", "ter", "del", "dup", "ins", "ext*")
@@ -463,6 +461,12 @@ class Pipeline:
             ClinGenAlleleTool(),
             GeneReviewsTool(),
         ]
+        # Direct reference for the phenotype-agnostic condition-inventory search
+        # (Stage 1b, pipeline.run()) — called outside the manifest/gate system
+        # since it isn't per-variant-gated the way the manifest-driven litvar2
+        # call is, but reusing the same instance keeps its class-level CGD
+        # cache shared.
+        self._litvar2_tool = next(t for t in self._tools if isinstance(t, LitVar2SummaryTool))
 
         # ── Executor ──────────────────────────────────────────────────────────
         self._executor = Executor(
@@ -605,7 +609,7 @@ class Pipeline:
             for entry in self._executor.process_log
             if entry["tool_name"] == "clinvar_gene_stats" and entry["gate"] == "PASS"
         }
-        actionable_indices, actionable_reasons = acmg_sf.build_actionable_set(
+        actionable_indices, actionable_reasons, actionable_classifications = acmg_sf.build_actionable_set(
             variants=variants,
             litvar2_raw_by_variant=litvar2_raw_by_variant,
             clingen_raw_by_variant=clingen_raw_by_variant,
@@ -847,6 +851,34 @@ class Pipeline:
                 "variant on the grounds that true homozygosity would be improbable.\n"
             )
 
+        def _evidence_only_context(i: int) -> str:
+            """Strip the PATIENT DATA header off context_slices[i], leaving only
+            this variant's own retrieved tool evidence — same stripping
+            _sibling_evidence_block below already relies on (there, applied to
+            a sibling's slice; here, applied to the variant's own slice), used
+            for the isolated gene-phenotype-extraction call below, which must
+            never see the patient's own phenotype text."""
+            m = _SLICE_HEADER_RE.match(context_slices[i])
+            return context_slices[i][m.end():].rstrip() if m else context_slices[i].rstrip()
+
+        def _gene_phenotype_block(i: int) -> str:
+            """Backend-extracted gene condition list for variant i (isolated
+            call, evidence-only — see phenotype_list_cache below), handed to
+            the reasoning prompt as a stated fact so Step 1 only has to judge
+            CLUSTER_PHENOTYPE by comparing the patient's phenotype against this
+            pre-compiled list, never re-derive or fill it in itself. A single
+            combined call asked to do both reliably conflated the two (wrote
+            the patient's own presenting complaint into the condition list, or
+            silently dropped an unrelated-but-real condition) — see
+            reasoning.run_gene_phenotype_extraction's docstring."""
+            return (
+                "\n--- GENE PHENOTYPE LIST (backend-extracted from retrieved "
+                "evidence only, computed before this patient's phenotype was "
+                "ever shown to that step — authoritative, do not re-derive or "
+                "add to it) ---\n"
+                f"PHENOTYPE: {phenotype_list_cache.get(i, 'NA')}\n"
+            )
+
         def _sibling_evidence_block(i: int) -> str:
             """Sibling block built from raw retrieval evidence (Call 1 — no reasoning
             exists yet). Skipped only when this variant is a CONFIRMED homozygous
@@ -874,6 +906,74 @@ class Pipeline:
                 )
             return "\n".join(parts) + "\n"
 
+        # ── Stage 1b: Gene-phenotype-list extraction (isolated, evidence-only) ──
+        # Runs before reasoning so its result can be handed to Step 1 as a
+        # stated fact (_gene_phenotype_block). Deliberately a separate SLM call
+        # per kept variant, given _evidence_only_context(i) — never
+        # context_slices[i] itself, which still carries the PATIENT DATA header
+        # — so this call has no patient phenotype text to conflate with the
+        # gene's own retrieved condition list. See
+        # reasoning.run_gene_phenotype_extraction's docstring for the failure
+        # this fixes.
+        #
+        # Also runs the phenotype-agnostic condition-inventory search
+        # (litvar2.run_condition_inventory) and appends it to the evidence —
+        # _evidence_only_context(i) alone still carries whatever the manifest-
+        # driven litvar2_summary tool retrieved during Stage 1 Retrieval, and
+        # that tool's own relevance selection is anchored to the patient's
+        # phenotype (see run_condition_inventory's docstring) — a real,
+        # well-documented condition for this gene that OMIM/CGD doesn't
+        # separately catalog and that doesn't overlap the patient's phenotype
+        # would otherwise never reach this call at all, regardless of how
+        # this call's own prompt is worded. Passed a ToolContext with
+        # patient_phenotype="" (not the real value) as defense in depth —
+        # this call path has no legitimate use for it.
+        phenotype_list_cache: dict[int, str] = {}
+
+        def _extract_phenotype_one(i: int) -> tuple[int, str]:
+            gene = variants[i].get("Gene", "NA")
+            evidence = _evidence_only_context(i)
+            if gene != "NA":
+                inventory_context = ToolContext(
+                    variant=variants[i],
+                    patient_phenotype="",
+                    all_outputs={},
+                    variant_report="",
+                    variant_index=i,
+                    total_variants=n,
+                    llm=self._llm,
+                )
+                try:
+                    condition_inventory = self._litvar2_tool.run_condition_inventory(
+                        gene, inventory_context,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[Pipeline] Condition-inventory search failed for variant %d (%s): %s",
+                        i + 1, gene, exc,
+                    )
+                    condition_inventory = None
+                if condition_inventory:
+                    evidence = evidence + "\n\n" + condition_inventory
+            return i, reasoning.run_gene_phenotype_extraction(
+                evidence_context=evidence, llm=self._llm,
+            )
+
+        workers = min(MAX_WORKERS_LLM, len(kept_indices))
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            futures = {pool.submit(_extract_phenotype_one, i): i for i in kept_indices}
+            for future in as_completed(futures):
+                i = futures[future]
+                try:
+                    i, phenotype_list = future.result()
+                except Exception as exc:
+                    logger.error(
+                        "[Pipeline] Gene-phenotype extraction failed for variant %d: %s",
+                        i + 1, exc,
+                    )
+                    phenotype_list = "NA"
+                phenotype_list_cache[i] = phenotype_list
+
         # ── Stage 2a: Reasoning (only on kept variants) ───────────────────────
         # Split into its own wave (rather than one combined reasoning+second_triage
         # call per variant) so that, for compound-het candidate genes, every kept
@@ -889,6 +989,7 @@ class Pipeline:
                 variant_context=context_slices[i], llm=self._llm,
                 sibling_context_block=sib_block,
                 inheritance_mode_block=mode_block,
+                gene_phenotype_block=_gene_phenotype_block(i),
             )
 
         workers = min(MAX_WORKERS_LLM, len(kept_indices))
@@ -909,17 +1010,24 @@ class Pipeline:
                     continue
                 reasoning_only[i] = r
 
-        # Backend-extracted PHENOTYPE CLUSTER MATCH verdict (YES/PARTIAL/NO/UNKNOWN),
-        # parsed once from each variant's own Stage 1 reasoning output. Computed here
-        # (not re-derived by second_triage/conclusion) for the same reason phase and
-        # gene inheritance mode are backend-determined facts: a judgment made once and
-        # restated verbatim is followed far more reliably than the same judgment left
-        # buried in prose and re-derived by each downstream stage on its own — which
-        # in practice produced inconsistent verdicts call to call for the same variant.
+        # Backend-extracted CLUSTER_PHENOTYPE verdict (YES/PARTIAL/NONE/INCIDENTAL/
+        # UNKNOWN), parsed once from each variant's own Stage 1 reasoning output
+        # (its paired PHENOTYPE tag comes from phenotype_list_cache instead —
+        # Stage 1b, an earlier and separate isolated call, see above). Computed
+        # here (not re-derived by second_triage/conclusion) for the same reason
+        # phase and gene inheritance mode are backend-determined facts: a
+        # judgment made once and restated verbatim is followed far more
+        # reliably than the same judgment left buried in prose and re-derived
+        # by each downstream stage on its own — which in practice produced
+        # inconsistent verdicts call to call for the same variant.
         cluster_match_cache: dict[int, str] = {
             i: reasoning.parse_cluster_match(reasoning_only[i])
             for i in kept_indices if i not in reasoning_failed
         }
+        # phenotype_list_cache (Stage 1b, computed above, before reasoning ever
+        # ran) is the authoritative PHENOTYPE source — it was extracted by an
+        # isolated call that never saw the patient's phenotype, so it cannot
+        # be conflated with it. Not re-parsed from reasoning_only[i] here.
 
         _CLUSTER_MATCH_LABELS = {
             "YES": (
@@ -931,13 +1039,31 @@ class Pipeline:
                 "LEAST ONE distinct cluster of the patient's phenotype; it is "
                 "silent on (not contradicting) at least one other cluster. This is "
                 "a POSITIVE, sufficient gene-phenotype link — treat it the same as "
-                "YES for inclusion/PVS1/Phenotype-fit purposes. Do NOT write 'no "
-                "gene-phenotype link', 'mismatch', or similar language for this "
-                "variant on phenotype grounds."
+                "YES for inclusion/PVS1/Phenotype-fit purposes ONLY. Do NOT write "
+                "'no gene-phenotype link', 'mismatch', or similar language for this "
+                "variant on phenotype grounds. EXCEPTION — PP4 specifically: PARTIAL "
+                "is NOT sufficient for PP4 (see conclusion.txt's PP4 condition (3), "
+                "'Full coverage') — PP4 requires a YES verdict. A gene that only "
+                "explains one cluster of a multi-cluster phenotype is not 'highly "
+                "specific' for what this patient actually has, even though it is "
+                "still a real enough link to keep the variant under consideration."
             ),
-            "NO": (
-                "NO — Stage 1 reasoning found no cluster of the patient's "
-                "phenotype that this gene's evidence overlaps."
+            "NONE": (
+                "NONE — Stage 1 reasoning found no cluster of the patient's "
+                "phenotype that this gene's evidence overlaps, and no other "
+                "well-established condition for this gene either."
+            ),
+            "INCIDENTAL": (
+                "INCIDENTAL — Stage 1 reasoning found this gene affirmatively "
+                "linked to a real, well-established, named condition that has "
+                "ZERO overlap with any cluster of the patient's presenting "
+                "phenotype — a different disease entirely (see the PHENOTYPE "
+                "tag below for its name). This variant is NEVER causative for "
+                "this patient regardless of its ACMG score — it belongs only "
+                "under Actionable/Incidental findings (section 3), never in "
+                "the causative section (section 2). Do NOT let a high "
+                "PVS1/PM2/PS2 score override this verdict, and do NOT re-derive "
+                "or second-guess it from the reasoning narrative."
             ),
             "UNKNOWN": (
                 "UNKNOWN — Stage 1 reasoning did not produce a clear verdict; judge "
@@ -946,17 +1072,26 @@ class Pipeline:
         }
 
         def _cluster_match_block(i: int) -> str:
-            """Backend-extracted Stage 1 phenotype-cluster verdict for variant i,
-            handed to second_triage and conclusion as a stated, closed fact —
-            same pattern as _inheritance_mode_block/_phase_fact — instead of
-            letting those stages re-read and re-judge the phenotype-fit
-            narrative themselves each time."""
+            """Backend-extracted Stage 1 CLUSTER_PHENOTYPE verdict + PHENOTYPE
+            tag for variant i, handed to second_triage, conclusion, and every
+            MOI-layer stage as a stated, closed fact — same pattern as
+            _inheritance_mode_block/_phase_fact — instead of letting those
+            stages re-read and re-judge the phenotype-fit narrative themselves
+            each time. The short machine-parseable "CLUSTER_PHENOTYPE: X" /
+            "PHENOTYPE: Y" lines are included verbatim (not just the long
+            prose label) so a later stage (final_conclusion.py's INCIDENTAL
+            cap/routing) can regex-match this fact directly out of whichever
+            downstream block reproduces this injected text, the same
+            reproduction pattern already observed for the prose label."""
             verdict = cluster_match_cache.get(i, "UNKNOWN")
+            phenotype_tag = phenotype_list_cache.get(i, "NA")
             label = _CLUSTER_MATCH_LABELS[verdict]
             return (
-                "\n--- PHENOTYPE CLUSTER MATCH (backend-extracted from Stage 1 "
+                "\n--- CLUSTER_PHENOTYPE (backend-extracted from Stage 1 "
                 "reasoning — authoritative, do not re-derive) ---\n"
+                f"CLUSTER_PHENOTYPE: {verdict}\n"
                 f"{label}\n"
+                f"PHENOTYPE: {phenotype_tag}\n"
             )
 
         def _sibling_block(i: int) -> str:
@@ -997,11 +1132,19 @@ class Pipeline:
 
         def _second_triage_one(i: int) -> tuple[int, str, str, str]:
             sib_block = _sibling_block(i)
+            gene_i = variants[i].get("Gene", "NA")
+            zyg_i = str(variants[i].get("Zygosity") or "").strip().lower()
+            is_hom_or_hemi = "hom" in zyg_i or "hemi" in zyg_i
+            is_purely_dominant_mode = gene_mode_cache.get(gene_i, "") in ("AD", "XLD")
             combined = reasoning.run_second_triage(
                 variant_context=context_slices[i],
                 reasoning_text=reasoning_only[i] + _zygosity_note_block(i) + _cluster_match_block(i),
                 llm=self._llm,
                 sibling_context_block=sib_block,
+                is_x_linked=moi.gene_chromosome(variants, [i]) == "X",
+                include_single_hit_recessive=not (is_hom_or_hemi or is_purely_dominant_mode),
+                include_compound_het_exception=bool(sib_block),
+                include_literature_evidence_quality=bool(litvar2_raw_by_variant.get(i)),
             )
             decision, justification = reasoning.parse_inclusion_decision(combined)
             return i, combined, decision, justification
@@ -1063,9 +1206,35 @@ class Pipeline:
         #     "trans" or "unknown" sibling relationship forces INCLUDE so the
         #     AR module (moi_recessive.py) — which requires phase == "trans" or
         #     "unknown" and hard-blocks "cis" — is the one to make the final call.
+        #
+        #     PHENOTYPE GATE (mandatory, checked before the phase check above):
+        #     this override exists to rescue a real compound-het candidate from a
+        #     hallucinated/premature cis call — it is not license to rescue a gene
+        #     Stage 1 has already determined has NO overlap with the patient's
+        #     phenotype at all. cluster_match_cache[i] is that same backend-parsed,
+        #     authoritative Stage 1 verdict already used to gate PP4/PVS1 at the
+        #     conclusion stage (see prompts/conclusion.txt's PHENOTYPE PERTINENCE
+        #     CHECK) — a real observed failure: NEB (nemaline myopathy) was
+        #     correctly EXCLUDEd by second_triage with cluster verdict NONE ("no
+        #     cluster of the patient's phenotype overlaps"), but the compound-het
+        #     override forced it back to INCLUDE anyway because phase alone wasn't
+        #     confirmed cis, and it went on to be scored Pathogenic and reported as
+        #     causative for a phenotype its own gene-disease evidence explicitly
+        #     does not cover. Being a real biallelic pair is necessary but not
+        #     sufficient — the gene must also plausibly explain the phenotype.
+        #     A pair with NONE (or INCIDENTAL) on both variants gets no
+        #     phase-based rescue at all.
         for gene, idxs in recessive_gene_groups.items():
             for i in idxs:
                 if i in reasoning_failed or inclusion_decisions.get(i) != "EXCLUDE":
+                    continue
+                if cluster_match_cache.get(i) in ("NONE", "INCIDENTAL"):
+                    logger.info(
+                        "[Pipeline] Second-triage override withheld: variant %d (%s) "
+                        "has CLUSTER_PHENOTYPE: %s — compound-het/phase status "
+                        "does not override a confirmed phenotype mismatch; EXCLUDE stands.",
+                        i + 1, gene, cluster_match_cache.get(i),
+                    )
                     continue
                 siblings = [j for j in idxs if j != i]
                 phases = {
@@ -1122,6 +1291,7 @@ class Pipeline:
         conclusion_targets = [i for i in kept_indices if i not in reasoning_failed]
         conclusions: dict[int, str] = {}
         base_acmg_points: dict[int, int | None] = {}
+        conclusion_failed: set[int] = set()
         def _conclude_one(i: int) -> tuple[int, str]:
             gene = variants[i].get("Gene", "NA")
             ca   = cross_analyses.get(gene) if gene != "NA" else None
@@ -1142,12 +1312,33 @@ class Pipeline:
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             futures = {pool.submit(_conclude_one, i): i for i in conclusion_targets}
             for future in as_completed(futures):
-                i, conc = future.result()
+                i = futures[future]
+                gene = variants[i].get("Gene", "?")
+                try:
+                    i, conc = future.result()
+                except Exception as exc:
+                    # Same fail-loud-but-keep-going shape as reasoning_failed
+                    # above: a malformed conclusion (e.g. SLMError from
+                    # conclusion.py's ACMG-criteria-section check) must not
+                    # silently disappear — record it as a visible failure note
+                    # (surfaced in the Unclassified appendix below, since
+                    # conclusion_failed indices are excluded from every MOI
+                    # layer target list that reads conclusions[i]) instead of
+                    # feeding broken/incomplete text into moi_denovo etc.,
+                    # which can only copy criteria verbatim, never invent them.
+                    logger.error(
+                        "[Pipeline] Conclusion failed for variant %d (%s): %s",
+                        i + 1, gene, exc,
+                    )
+                    conclusions[i] = f"[CONCLUSION FAILED: {exc}]"
+                    base_acmg_points[i] = None
+                    conclusion_failed.add(i)
+                    continue
                 conclusions[i] = conc
                 base_acmg_points[i] = _extract_acmg_points_value(conc)
                 logger.info(
                     "[Pipeline] Conclusion done for variant %d (%s), base ACMG points=%s.",
-                    i + 1, variants[i].get("Gene", "?"), base_acmg_points[i],
+                    i + 1, gene, base_acmg_points[i],
                 )
 
         # ── Stage 4.5: MOI-specific layers (3: de novo, 4: dominant-inherited,
@@ -1195,6 +1386,7 @@ class Pipeline:
             i for i in include_indices
             if variants[i].get("Gene", "NA") in denovo_genes
             and any(_parental_ab_presence(i))
+            and i not in conclusion_failed
         ]
         denovo_outputs: dict[int, str] = {}
 
@@ -1248,6 +1440,7 @@ class Pipeline:
             i for i in include_indices
             if variants[i].get("Gene", "NA") in dominant_genes
             and segregation_cache[i] in ("maternal", "paternal")
+            and i not in conclusion_failed
         ]
         dominant_outputs: dict[int, str] = {}
 
@@ -1287,7 +1480,7 @@ class Pipeline:
         #     LLM call — a CIS pair never reaches moi_recessive.run_pair) ────
         recessive_gene_groups_included: dict[str, list[int]] = {}
         for gene, idxs in recessive_gene_groups.items():
-            kept_and_included = [i for i in idxs if i in include_set]
+            kept_and_included = [i for i in idxs if i in include_set and i not in conclusion_failed]
             if len(kept_and_included) >= 2:
                 recessive_gene_groups_included[gene] = kept_and_included
 
@@ -1345,6 +1538,7 @@ class Pipeline:
             if gene_mode_cache.get(variants[i].get("Gene", "NA")) in ("AR", "XLR", "AD_AR", "XLD_XLR")
             and moi.zygosity_is_confirmed_hom(variants[i].get("Zygosity", ""))
             and variants[i].get("Gene", "NA") not in recessive_gene_groups_included
+            and i not in conclusion_failed
         ]
 
         def _recessive_solo_one(i: int) -> tuple[int, str, str]:
@@ -1385,16 +1579,21 @@ class Pipeline:
         xlinked_targets = [
             i for i in include_indices
             if gene_chrom_cache.get(variants[i].get("Gene", "NA")) == "X"
+            and i not in conclusion_failed
         ]
         xlinked_outputs: dict[int, str] = {}
 
         def _xlinked_one(i: int) -> tuple[int, str]:
             ab_entry = parental_ab[i] if parental_ab else {}
             pattern = segregation.classify_xlinked_ab(ab_entry.get("proband"), ab_entry.get("mother"))
+            seg = segregation.classify_segregation(
+                ab_entry.get("proband"), ab_entry.get("mother"), ab_entry.get("father")
+            )
             return i, moi_xlinked.run_one(
                 variant_context=context_slices[i],
                 base_conclusion=conclusions[i],
                 xlinked_pattern=pattern,
+                segregation=seg,
                 llm=self._llm,
             )
 
@@ -1445,7 +1644,13 @@ class Pipeline:
                 "condition":      acmg_sf.ACMG_SF_CONDITIONS.get(variants[i].get("Gene", ""), "n/a"),
                 "reason":         actionable_reasons.get(i, ""),
                 "zygosity":       variants[i].get("Zygosity", "NA"),
-                "classification": _extract_classification_label(conclusions.get(i, "")),
+                # Phenotype-independent by design (see acmg_sf.build_actionable_set's
+                # docstring) — must NOT be re-derived from this variant's own base
+                # conclusion, which scores PP4/PVS1 against THIS patient's phenotype
+                # and is the wrong source for a secondary finding's classification
+                # precisely when phenotype and gene are unrelated (the common case
+                # for an incidental finding).
+                "classification": actionable_classifications.get(i, "Pathogenic/Likely pathogenic"),
             }
             for i in sorted(actionable_indices)
             if i in conclusions

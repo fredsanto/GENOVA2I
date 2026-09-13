@@ -43,6 +43,23 @@ TASK:
    evidence is silent or ambiguous on parental phenotype, do NOT apply PP1 —
    state that cosegregation could not be confirmed from available evidence.
 
+   UNCONFIRMED/SUSPECTED PARENTAL PHENOTYPE: if the family-history text
+   describes the transmitting parent with a SUSPECTED, POSSIBLE, or
+   not-yet-confirmed diagnosis matching the patient's condition (e.g.
+   "suspicion of X", "possible X", "query X") rather than a confirmed
+   diagnosis — treat this the same direction as an AFFECTED parent for
+   cosegregation purposes (apply PP1 [Supporting, +1] if otherwise
+   applicable; do NOT apply BS2/DEFAULT-UNAFFECTED POLICY against this
+   parent — an explicitly suspected-affected parent is not a clean
+   unaffected carrier). This is weaker evidence than a confirmed diagnosis,
+   so it must never be silently upgraded to full confirmed-cosegregation
+   language. Always add one explicit sentence to the Comment below flagging
+   this: state plainly that the parent's phenotype is SUSPECTED/UNCONFIRMED
+   and that definitive interpretation of this finding is PENDING CLINICAL
+   CONFIRMATION of the parent's phenotype. This caveat must survive into
+   the Comment field verbatim in substance — it is what tells the final
+   report reader this call rests on an unconfirmed parental diagnosis.
+
 4. Check the BASE CONCLUSION's own ACMG criteria list above for whether BS4
    (lack of segregation) was already applied there. If it was, do not
    re-derive BS4 here — factor the existing base BS4 into your PP1 judgment

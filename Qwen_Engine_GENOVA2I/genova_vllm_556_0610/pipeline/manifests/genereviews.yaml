@@ -9,6 +9,12 @@ gate:
   field: Gene
   operator: not_na
 
+compress:
+  enabled: true
+  threshold: auto
+  strategy: slm
+  max_tokens: 400
+
 timeout: 15
 retry:
   attempts: 2

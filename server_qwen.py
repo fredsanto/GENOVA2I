@@ -435,21 +435,35 @@ async def _run_direct_impl(job_id: str, csv_bytes: bytes, filename: str, phenoty
         _tick("triage", variant_idx=idx, gene=gene)
         return result
 
-    def _patched_reasoning(variant_context, llm, sibling_context_block="", inheritance_mode_block=""):
-        result    = _orig_reasoning(
-            variant_context, llm,
-            sibling_context_block=sibling_context_block,
-            inheritance_mode_block=inheritance_mode_block,
-        )
+    def _patched_reasoning(variant_context, llm, **kwargs):
+        # **kwargs (not a fixed signature) — same reasoning as
+        # _patched_second_triage below: a future parameter added to
+        # reasoning.run_reasoning (e.g. gene_phenotype_block) must pass
+        # through automatically, or every variant's reasoning call raises
+        # "unexpected keyword argument" and fails silently into an
+        # empty-looking report. This wrapper's previous fixed signature
+        # (sibling_context_block/inheritance_mode_block only) hit exactly
+        # that failure the moment gene_phenotype_block was added.
+        result    = _orig_reasoning(variant_context, llm, **kwargs)
         idx, gene = _ctx_info(variant_context)
         _tick("reasoning", variant_idx=idx, gene=gene)
         return result
 
-    def _patched_second_triage(variant_context, reasoning_text, llm, sibling_context_block=""):
-        return _orig_second_triage(
-            variant_context, reasoning_text, llm,
-            sibling_context_block=sibling_context_block,
-        )
+    def _patched_second_triage(variant_context, reasoning_text, llm, **kwargs):
+        # **kwargs (not a fixed signature) so any future parameter added to
+        # reasoning.run_second_triage (e.g. is_x_linked,
+        # include_single_hit_recessive, include_compound_het_exception,
+        # include_literature_evidence_quality — all added for conditional
+        # prompt assembly) passes through automatically. A real observed
+        # failure this fixes: this wrapper's previous fixed signature only
+        # forwarded sibling_context_block, so pipeline.py calling with
+        # is_x_linked=... raised "unexpected keyword argument 'is_x_linked'"
+        # and second_triage failed outright for every variant — silently
+        # producing an empty-looking report (no MOI layers, "no genetic
+        # findings") that read as a correct exclusion but was actually a
+        # crash. Matches the same **kwargs pattern _patched_run_variant
+        # above already uses for exactly this reason.
+        return _orig_second_triage(variant_context, reasoning_text, llm, **kwargs)
 
     def _patched_conclusion(variant_context, reasoning, cross_analysis, llm):
         result    = _orig_conclusion(variant_context, reasoning, cross_analysis, llm)

@@ -115,6 +115,19 @@ def mosaicism_note(ab_entry: dict | None) -> str:
     return f" (possible low-level parental mosaicism — {', '.join(flags)})"
 
 
+def _is_mosaic_trace(value) -> bool:
+    """True when *value* falls in the low-level parental mosaicism trace band
+    (0.02-0.2, same band as mosaicism_note() above) — a parent read that is
+    neither a clean 0 (true absent) nor a confirmed heterozygous carrier."""
+    if not _is_present(value):
+        return False
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return 0.02 < v < 0.2
+
+
 def classify_segregation(proband_ab, mother_ab, father_ab) -> str:
     """Classify a trio's segregation pattern for one variant.
 
@@ -151,6 +164,14 @@ def classify_segregation(proband_ab, mother_ab, father_ab) -> str:
 
     if mother_present and father_present:
         if proband_class == "het" and mother_class == "absent" and father_class == "absent":
+            # If a parent is in the mosaic-trace band (not a clean 0), the
+            # proband's own AB must clear 0.35 — comfortably inside "het"
+            # rather than at its low edge — before this is trusted as a
+            # genuine de novo signal rather than two independently marginal
+            # reads (parent trace + proband borderline) that could both be
+            # assay noise on the same site.
+            if (_is_mosaic_trace(mother_ab) or _is_mosaic_trace(father_ab)) and float(proband_ab) < 0.35:
+                return "uncertain"
             return "de_novo"
         if proband_class == "hom" and mother_class == "het" and father_class == "het":
             return "both_carriers"

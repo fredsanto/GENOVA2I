@@ -15,7 +15,8 @@ Public API:
     ACMG_SF_GENES                       — frozenset of gene symbols
     ACMG_SF_CONDITIONS                  — {gene: condition string}
     build_actionable_set(variants, litvar2_raw_by_variant, llm)
-        -> (set[int] actionable_indices, dict[int, str] reasons)
+        -> (set[int] actionable_indices, dict[int, str] reasons,
+            dict[int, str] classifications)
 """
 
 from __future__ import annotations
@@ -249,12 +250,30 @@ def build_actionable_set(
          ClinVar record exists, not its significance, so the check fails
          closed rather than false-positiving on a bare variation ID.
 
-    Returns (actionable_indices, reasons) where reasons[i] is a short string
-    describing why variant i was flagged, for use in triage-exemption
-    justifications and the Actionable Variants report section.
+    Returns (actionable_indices, reasons, classifications). reasons[i] is a
+    short string describing why variant i was flagged, for use in
+    triage-exemption justifications and the Actionable Variants report
+    section. classifications[i] is this variant's OWN, phenotype-independent
+    P/LP classification (e.g. "Pathogenic", "Likely pathogenic") resolved
+    from the exact same evidence that triggered the flag above — this MUST
+    be used verbatim as this finding's reported classification, never
+    re-derived from that variant's phenotype-scored base-conclusion ACMG
+    label elsewhere in the pipeline. A real observed failure this fixes: a
+    BRCA1 frameshift variant was correctly flagged actionable here from its
+    own ClinVar record (46/46 submitters, Pathogenic) — the report's
+    Actionable Findings section then displayed its classification as
+    "Uncertain Significance (VUS)" anyway, because the caller pulled that
+    label from the variant's Layer 2 base conclusion, which (correctly, for
+    ITS OWN purpose) scores PP4/PVS1 against this patient's presenting
+    phenotype and found no gene-disease link to it. ACMG SF reporting is
+    gene+classification driven, independent of phenotype, by design (see
+    module docstring) — a secondary-finding gene's own real-world
+    pathogenicity must never be diluted by a phenotype mismatch that is
+    completely beside the point for a mandatory secondary finding.
     """
     actionable_indices: set[int] = set()
     reasons: dict[int, str] = {}
+    classifications: dict[int, str] = {}
     clingen_raw_by_variant = clingen_raw_by_variant or {}
     clinvar_tally_raw_by_variant = clinvar_tally_raw_by_variant or {}
 
@@ -267,6 +286,7 @@ def build_actionable_set(
         if is_pathogenic_clinvar(clinvar_class):
             actionable_indices.add(i)
             reasons[i] = f"ClinVar_class={clinvar_class}"
+            classifications[i] = str(clinvar_class).strip()
             logger.info(
                 "[ACMG-SF] Variant %d (%s) flagged actionable via ClinVar_class=%s",
                 i + 1, gene, clinvar_class,
@@ -277,6 +297,7 @@ def build_actionable_set(
         if is_pathogenic_clinvar(resolved_status):
             actionable_indices.add(i)
             reasons[i] = f"ClinVar submission tally (variant-level, deterministic): {resolved_status}"
+            classifications[i] = str(resolved_status).strip()
             logger.info(
                 "[ACMG-SF] Variant %d (%s) flagged actionable via ClinVarGeneStatsTool "
                 "submission tally (CSV ClinVar_class was unusable): %s",
@@ -290,6 +311,7 @@ def build_actionable_set(
         if litvar2_text and _slm_check_litvar2_pathogenic(gene, hgvs, litvar2_text, llm):
             actionable_indices.add(i)
             reasons[i] = "P/LP variant reported for this gene in literature (LitVar2/PubMed evidence)"
+            classifications[i] = "Pathogenic/Likely pathogenic (per literature evidence)"
             logger.info(
                 "[ACMG-SF] Variant %d (%s) flagged actionable via litvar2 evidence fallback",
                 i + 1, gene,
@@ -300,9 +322,10 @@ def build_actionable_set(
         if clingen_text and _slm_check_clingen_pathogenic(gene, hgvs, clingen_text, llm):
             actionable_indices.add(i)
             reasons[i] = "P/LP variant per ClinGen Allele Registry ClinVar cross-reference"
+            classifications[i] = "Pathogenic/Likely pathogenic (per ClinGen/ClinVar cross-reference)"
             logger.info(
                 "[ACMG-SF] Variant %d (%s) flagged actionable via clingen_allele evidence fallback",
                 i + 1, gene,
             )
 
-    return actionable_indices, reasons
+    return actionable_indices, reasons, classifications

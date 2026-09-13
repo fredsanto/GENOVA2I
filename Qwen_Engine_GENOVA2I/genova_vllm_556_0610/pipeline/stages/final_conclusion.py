@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,10 +35,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_PROMPT_PATH        = Path(__file__).parent.parent.parent / "prompts" / "clinical_conclusion.txt"
-_REVISE_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "final_conclusion_revise.txt"
+_PROMPT_PATH           = Path(__file__).parent.parent.parent / "prompts" / "clinical_conclusion.txt"
+_LAYER_PROMPT_PATH     = Path(__file__).parent.parent.parent / "prompts" / "layer_conclusion.txt"
+_REVISE_PROMPT_PATH    = Path(__file__).parent.parent.parent / "prompts" / "final_conclusion_revise.txt"
+_RECONCILE_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "final_conclusion_reconcile.txt"
 
 MAX_NEW_TOKENS_FINAL_CONCLUSION = 3000
+MAX_NEW_TOKENS_LAYER            = 1500
+MAX_WORKERS_LAYER               = 5
 
 # With --max-model-len 16384, leave 2000 tokens for prompt template + output.
 # ~4 chars per token → 14384 × 4 = 57536 chars safe budget for the conclusions block.
@@ -63,20 +68,112 @@ def _load_prompt(path: Path = _PROMPT_PATH) -> str:
     raise FileNotFoundError(f"Prompt not found at {path}.")
 
 
-def _build_layers_text(layer_outputs: dict[str, list[str]], unclassified_conclusions: list[str]) -> str:
-    """Render each MOI layer's blocks under its own labelled header, plus an
-    Unclassified section if present, so the model sees which layer each
-    finding came from rather than a flat undifferentiated list."""
-    parts = []
-    for layer_name, blocks in layer_outputs.items():
-        if not blocks:
-            continue
-        parts.append(f"=== {layer_name.upper()} LAYER ===\n\n" + "\n\n---\n\n".join(blocks))
-    if unclassified_conclusions:
-        parts.append(
-            "=== UNCLASSIFIED (no MOI-specific analysis; base ACMG score only) ===\n\n"
-            + "\n\n---\n\n".join(unclassified_conclusions)
+# ── Stage A — MAP: per-layer parallel synthesis ─────────────────────────────
+#
+# A real observed failure: a patient with an unusually large evidence
+# volume (many compound-het VUS blocks in one gene bloating the De
+# Novo/Dominant-Inherited layers) produced a combined layer text of
+# ~95-98k chars against this stage's 50k-char budget. The blind
+# `conclusions_text[:_MAX_CONCLUSIONS_CHARS]` front-slice in run() silently
+# dropped the ENTIRE Recessive layer (third in the fixed key order below) —
+# a real causative compound-het finding — before the LLM ever saw it, and
+# the synthesis model then correctly, but misleadingly, reported "no
+# Recessive layer blocks were provided" (true of what it was given, false of
+# what actually existed). The deterministic completeness check downstream
+# caught the omission, but only as a mechanical footnote, not a real fix.
+#
+# Synthesizing each MOI layer independently, in parallel, before ever
+# building one combined prompt fixes this structurally rather than by
+# raising the budget number: (1) a layer's own map call cannot misreport
+# another layer's contents, since it never sees them; (2) each map call's
+# input is bounded by ONE layer's own evidence, not the sum across all
+# layers, so the common case of "one large layer, others small" no longer
+# risks starving a small-but-critical layer; (3) only causative (>=6pt) and
+# notable-VUS (4-6pt) content survives into the reduce prompt — the bulk of
+# a layer's raw text (VUS-below-4/benign blocks the SCOPE RULE forbids
+# mentioning anywhere in the report regardless) is dropped at the source
+# instead of eating budget it was never going to use downstream.
+#
+# This does not replace _qualifying_causative_findings /
+# _enforce_causative_completeness / _reconcile_missing_causative below —
+# those still scan the ORIGINAL, full, untruncated layer_outputs directly
+# (never the map stage's output) and remain the deterministic safety net of
+# last resort if a map call itself still drops something.
+
+def _build_layer_prompt(layer_name: str, blocks: list[str], patient_phenotype: str) -> str:
+    template = _load_prompt(_LAYER_PROMPT_PATH)
+    return (template
+        .replace("{patient_phenotype}", patient_phenotype)
+        .replace("{layer_name}", layer_name)
+        .replace("{layer_blocks}", "\n\n---\n\n".join(blocks)))
+
+
+def _synthesize_layer(layer_name: str, blocks: list[str], patient_phenotype: str, llm: "LLMClient") -> str:
+    """One MAP call, scoped to a single layer's own blocks. Falls back to the
+    raw block text (pre-restructuring behavior for this layer only) on any
+    LLM failure, so a single layer's map error never loses that layer's
+    evidence entirely — it just reaches the reduce prompt unsummarized."""
+    try:
+        return llm.generate(
+            system=(
+                "You are an expert clinical geneticist, extracting causative "
+                "and notable-VUS findings from one MOI layer's own evidence."
+            ),
+            user=_build_layer_prompt(layer_name, blocks, patient_phenotype),
+            max_tokens=MAX_NEW_TOKENS_LAYER,
         )
+    except Exception as exc:
+        logger.warning(
+            "[FinalConclusion] Layer synthesis failed for %s (%s) — "
+            "falling back to raw block text for this layer.",
+            layer_name, exc,
+        )
+        return "\n\n---\n\n".join(blocks)
+
+
+def _synthesize_layers_parallel(
+    layer_outputs: dict[str, list[str]],
+    unclassified_conclusions: list[str],
+    patient_phenotype: str,
+    llm: "LLMClient",
+) -> dict[str, str]:
+    """Fan out one MAP call per non-empty layer (including Unclassified as
+    its own pseudo-layer), concurrently. Returns {layer_name: synthesized
+    text}; a layer with no blocks at all is simply absent from the result —
+    never represented by an empty or fabricated entry."""
+    jobs: dict[str, list[str]] = {name: blocks for name, blocks in layer_outputs.items() if blocks}
+    if unclassified_conclusions:
+        jobs["Unclassified"] = unclassified_conclusions
+    if not jobs:
+        return {}
+
+    results: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS_LAYER, len(jobs))) as pool:
+        futures = {
+            pool.submit(_synthesize_layer, name, blocks, patient_phenotype, llm): name
+            for name, blocks in jobs.items()
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            results[name] = future.result()
+    return results
+
+
+def _build_layers_text_from_synth(layer_synth: dict[str, str]) -> str:
+    """Wrap each layer's already-synthesized (MAP-stage) text under the same
+    "=== NAME LAYER ===" headers the previous raw-block concatenation used,
+    so the reduce prompt (clinical_conclusion.txt) and the revise/reconcile
+    prompts — which all pattern-match on these exact header strings — see an
+    unchanged shape, just pre-filtered content."""
+    parts = []
+    for name, text in layer_synth.items():
+        if not text or not text.strip():
+            continue
+        if name == "Unclassified":
+            header = "=== UNCLASSIFIED (no MOI-specific analysis; base ACMG score only) ==="
+        else:
+            header = f"=== {name.upper()} LAYER ==="
+        parts.append(f"{header}\n\n{text.strip()}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -94,6 +191,86 @@ def _build_actionable_text(actionable_variants: list[dict] | None) -> str:
             f"zygosity: {v['zygosity']}; classification: {v['classification']}"
         )
     return "\n".join(lines)
+
+
+# ── Deterministic single-hit-recessive false-positive cap ──────────────────
+#
+# prompts/conclusion.txt's RECESSIVE SINGLE-HIT CHECK already tells the base
+# conclusion to write "insufficient data" in Inheritance check and refuse to
+# call the variant causative in its Comment — but a real observed failure
+# showed the model can write that correct prose and then still compute a
+# normal, uncapped "Total ACMG points: 11 → Pathogenic" line one sentence
+# later, and a downstream stage reads that label, not the prose next to it.
+# This mirrors recompute_and_fix_totals()'s role (fixing a block's own stated
+# number deterministically, in Python, before anything downstream trusts it)
+# but for a self-contradiction between a block's own text and its own label
+# rather than an arithmetic error.
+_SINGLE_HIT_RECESSIVE_SIGNAL_RE = re.compile(
+    r"insufficient (?:data|to confirm a diagnosis)[^\n]*"
+    r"(?:recessive gene|second (?:variant|allele|hit)|compound heterozygous or homozygous partner)"
+    r"|no second (?:variant|allele|hit)[^\n]*identified"
+    r"|single heterozygous hit",
+    re.IGNORECASE,
+)
+# NOTE: the regex above only fires on the base block's OWN insufficiency
+# language (see docstring below) — it does NOT re-derive gene inheritance
+# mode independently. A real observed failure: a heterozygous de novo variant
+# in a gene PRIOR REASONING had already called Autosomal Recessive was
+# instead described in the block's own Inheritance check as "autosomal
+# dominant motor neuron disease... a single hit is possible for dominant
+# conditions" — the model re-labeled the gene's mode to dodge this exact
+# signal, and de novo status (PS2) does not change that a single heterozygous
+# hit in an AR/XLR gene is still one allele, not two. prompts/conclusion.txt's
+# RECESSIVE SINGLE-HIT CHECK now explicitly forbids re-deriving the gene mode
+# here, but if a block still manages to do so, this regex will not catch it —
+# same limitation as the "reasoned incorrectly and never flagged it" case
+# documented in the docstring below.
+_PATHOGENIC_TOTAL_LINE_RE = re.compile(
+    r"\*\*(?:Total )?ACMG points:\*\*\s*[-+]?\d+(?:\.\d+)?\s*→\s*"
+    r"(?:Likely Pathogenic|Pathogenic)\b",
+)
+
+
+def _cap_single_hit_recessive_false_positives(blocks: list[str]) -> list[str]:
+    """
+    For each Unclassified base-conclusion block: if its own text carries the
+    RECESSIVE SINGLE-HIT CHECK's insufficiency language (a heterozygous
+    single hit in an AR/XLR gene, no second allele) alongside an uncapped
+    Pathogenic/Likely Pathogenic total line, mechanically downgrade BOTH the
+    numeric points value and the label before this block is ever rendered
+    into the synthesis prompt or scanned by _qualifying_causative_findings()
+    — replacing only the label and leaving the original number (e.g. "11 →
+    Uncertain Significance") would still read as >= 6 to that function's
+    purely numeric threshold check (_CAUSATIVE_THRESHOLD), silently
+    re-admitting the exact finding this is meant to block. Capped to 2 (below
+    both the causative threshold of 6 and the Notable-VUS floor of 4) since a
+    single-hit recessive finding contributes nothing toward explaining THIS
+    patient's phenotype under a recessive model, not merely "not quite
+    enough" — it does not belong in section 4 either. No-op on any block
+    that doesn't match both signals.
+
+    Deliberately text-pattern-based, not data-driven: whether this variant is
+    a het single-hit in a recessive-only gene is exactly the judgment the
+    model's own prompt (RECESSIVE SINGLE-HIT CHECK, prompts/conclusion.txt)
+    already asks the model to reason through and state — zygosity, gene mode,
+    and presence/absence of a second hit are all in front of it. This
+    function is a consistency check on that reasoning (does the printed
+    score match the insufficiency the model itself already wrote?), not a
+    replacement for it — it never fires on a block that doesn't contain the
+    model's own insufficiency language, so a block where the model reasoned
+    incorrectly and never flagged the problem at all is not caught here.
+    """
+    fixed = []
+    for block in blocks:
+        if _SINGLE_HIT_RECESSIVE_SIGNAL_RE.search(block) and _PATHOGENIC_TOTAL_LINE_RE.search(block):
+            block = _PATHOGENIC_TOTAL_LINE_RE.sub(
+                "**ACMG points:** 2 → Uncertain Significance (VUS) [capped from an "
+                "uncapped Pathogenic/Likely Pathogenic total — single heterozygous "
+                "hit in a recessive gene, no second allele]",
+                block,
+            )
+        fixed.append(block)
+    return fixed
 
 
 # ── Deterministic causative-list completeness check ─────────────────────────
@@ -148,11 +325,13 @@ def _qualifying_causative_findings(
                     "points": points,
                     "label":  total_m.group(2).strip(),
                     "layer":  layer_name,
+                    "block":  block,
                 })
             return
         f = _extract_variant_finding(block)
         if f and f["points"] >= _CAUSATIVE_THRESHOLD:
             f["layer"] = layer_name
+            f["block"] = block
             findings.append(f)
 
     for layer_name, blocks in layer_outputs.items():
@@ -219,6 +398,89 @@ def _enforce_causative_completeness(
     if m3:
         return text[: m3.start()] + addendum + "\n" + text[m3.start():]
     return text + "\n" + addendum
+
+
+# ── SLM reconciliation of the completeness check's own findings ─────────────
+#
+# _enforce_causative_completeness (above) is a purely mechanical safety net:
+# it appends an FYI addendum, it never rewrites section 2 itself. The revise
+# pass (final_conclusion_revise.txt) DOES carry a CAUSATIVE-THRESHOLD OMISSION
+# CHECK instruction telling the model to self-scan for exactly this — but that
+# is one bullet among ~15 mandatory checks competing for attention in a single
+# call, and in practice it still misses cases the deterministic scan catches
+# (e.g. a gene where a low-scoring variant in one layer and a high-scoring
+# variant in a different layer for the SAME gene get conflated, and the low
+# score is what survives into section 2 — the CAUSATIVE-THRESHOLD OMISSION
+# CHECK's own instructions don't name this specific same-gene-different-
+# variant failure mode). _reconcile_missing_causative hands the SLM the exact
+# already-verified missing finding(s) plus their own source block text
+# directly, as the ONLY task for that call, rather than asking it to re-derive
+# the omission itself alongside 14 other checks.
+
+MAX_NEW_TOKENS_RECONCILE = 3000
+
+
+def _build_missing_findings_text(missing: list[dict]) -> str:
+    """Render each missing finding's full source block, deduplicated — a
+    compound-het PAIR block contributes the same block text for both of its
+    variants (see _process's joint_m branch above), so it must be shown once,
+    not twice."""
+    seen: list[str] = []
+    for f in missing:
+        if f["block"] not in seen:
+            seen.append(f["block"])
+    return "\n\n---\n\n".join(seen)
+
+
+def _reconcile_missing_causative(
+    text: str,
+    missing: list[dict],
+    llm: "LLMClient",
+    patient_phenotype: str,
+    actionable_text: str,
+) -> str | None:
+    """
+    Focused third SLM pass, fired ONLY when the deterministic completeness
+    check finds a variant the CAUSATIVE THRESHOLD RULE requires in section 2
+    that both the draft and revise passes missed. Single job: incorporate the
+    named missing finding(s), given their own source block text directly.
+
+    Returns the reconciled text, or None on any failure (network/parse error,
+    or a malformed/truncated response) — callers fall back to
+    _enforce_causative_completeness's mechanical addendum in that case, so a
+    failure here never regresses below the pre-existing behavior.
+    """
+    try:
+        template = _load_prompt(_RECONCILE_PROMPT_PATH)
+        prompt = (template
+            .replace("{patient_phenotype}", patient_phenotype)
+            .replace("{actionable_variants}", actionable_text)
+            .replace("{current_conclusion}", text)
+            .replace("{missing_findings_blocks}", _build_missing_findings_text(missing)))
+
+        reconciled = llm.generate(
+            system=(
+                "You are an expert clinical geneticist, adding a confirmed-missing "
+                "finding to an existing clinical conclusion."
+            ),
+            user=prompt,
+            max_tokens=MAX_NEW_TOKENS_RECONCILE,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[FinalConclusion] Reconcile pass failed (%s) — falling back to mechanical addendum.",
+            exc,
+        )
+        return None
+
+    if not _is_well_formed(reconciled):
+        logger.warning(
+            "[FinalConclusion] Reconcile pass produced malformed/truncated output — "
+            "falling back to mechanical addendum."
+        )
+        return None
+
+    return reconciled
 
 
 # ── Deterministic last-resort fallback ──────────────────────────────────────
@@ -377,9 +639,22 @@ def run(
     """
     logger.info("[FinalConclusion] Synthesising cross-MOI clinical conclusion...")
 
-    conclusions_text = _build_layers_text(layer_outputs, unclassified_conclusions)
+    unclassified_conclusions = _cap_single_hit_recessive_false_positives(unclassified_conclusions)
+
+    # Stage A — MAP: each layer synthesized independently/in parallel (see
+    # _synthesize_layers_parallel's docstring). Replaces the previous direct
+    # _build_layers_text(layer_outputs, unclassified_conclusions) call, which
+    # concatenated every raw block from every layer into one prompt.
+    layer_synth = _synthesize_layers_parallel(
+        layer_outputs, unclassified_conclusions, patient_phenotype, llm,
+    )
+    conclusions_text = _build_layers_text_from_synth(layer_synth)
 
     if len(conclusions_text) > _MAX_CONCLUSIONS_CHARS:
+        # Last-resort safety net only now — the map stage already dropped
+        # everything below the VUS floor, so hitting this budget after that
+        # filtering means a genuinely enormous number of >=4pt findings, not
+        # the common case this used to guard against.
         logger.warning(
             "[FinalConclusion] Combined layer outputs (%d chars) exceeds budget — truncating.",
             len(conclusions_text),
@@ -415,6 +690,21 @@ def run(
 
     def _finalize(candidate: str) -> str:
         fixed = recompute_and_fix_totals(candidate)
+
+        # Deterministic scan first (cheap, no SLM call): only fire the
+        # reconcile pass when something is actually missing.
+        findings = _qualifying_causative_findings(layer_outputs, unclassified_conclusions)
+        missing = _missing_from_section_2(fixed, findings)
+        if missing:
+            reconciled = _reconcile_missing_causative(
+                fixed, missing, llm, patient_phenotype, actionable_text,
+            )
+            if reconciled is not None:
+                fixed = recompute_and_fix_totals(reconciled)
+
+        # Safety net either way: a no-op if the reconcile pass (or the
+        # absence of any missing finding) already left nothing missing;
+        # otherwise mechanically appends whatever still wasn't incorporated.
         return _enforce_causative_completeness(fixed, layer_outputs, unclassified_conclusions)
 
     def _recover_from_malformed_draft() -> str:
