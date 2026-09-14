@@ -3,7 +3,7 @@ The following reasoning has been produced for a genetic variant found in a patie
 
 --- VARIANT EVIDENCE ---
 {augmented_context}
-
+{inheritance_mode_block}
 --- CLINICAL REASONING ---
 {reasoning}
 {sibling_context_block}
@@ -19,36 +19,79 @@ INCLUDE requires evidence for BOTH:
 1. GENE-PHENOTYPE LINK — the gene is known or strongly suspected to cause the
    patient's phenotype:
 
+   HARD GATE — CLUSTER_PHENOTYPE ALONE DECIDES THIS CRITERION, NOT YOUR OWN
+   READING OF THE PHENOTYPE PROSE. The verdict is one of five tokens — YES,
+   PARTIAL, NONE, INCIDENTAL, or UNKNOWN — never "NO" (not a valid token; if
+   you find yourself writing "NO" for this gate, you mean NONE below):
+     CLUSTER_PHENOTYPE = YES or PARTIAL -> criterion 1 is SATISFIED for THIS
+       patient, full stop. INCLUDE gets this criterion for free; EXCLUDE may
+       NEVER be justified on phenotype grounds when this is the verdict.
+     CLUSTER_PHENOTYPE = INCIDENTAL -> NOT the same as NONE — do NOT EXCLUDE.
+       The gene DOES cause a real, different, well-established disease, just
+       one with zero overlap to this patient's presenting phenotype. INCLUDE
+       this variant so it reaches the conclusion stage and gets reported —
+       under Actionable/Incidental findings, never as causative for this
+       patient's presenting phenotype regardless of its ACMG score (that
+       routing is the conclusion stage's job, driven by this same verdict;
+       your only job here is not to drop the variant). Still evaluate
+       criterion 2 (pathogenicity) normally below.
+     CLUSTER_PHENOTYPE = NONE -> criterion 1 is NOT satisfied — this is a
+       real, confident Stage 1 judgment (no usable gene-disease evidence at
+       all to compare), not a data gap. EXCLUDE on phenotype grounds, UNLESS
+       a separate, independently named evidence track (e.g. a distinct
+       LitVar2 variant-level hit — not the same gene-level track that
+       produced NONE) supplies its own match Stage 1 missed; name that track
+       by name if you invoke this exception.
+     CLUSTER_PHENOTYPE = UNKNOWN, or the block is entirely absent -> this is
+       NOT a verdict, it means Stage 1's reasoning call failed to produce a
+       parseable one at all (a formatting/data gap, not a negative judgment
+       about the gene). Do NOT treat this the same as NONE — fall back to
+       judging criterion 1 yourself from the sub-points below, using the
+       CLINICAL REASONING prose as your evidence.
+   (ACMG SF actionable-finding variants are force-INCLUDEd by the pipeline
+   after this call regardless of this gate — that override happens in code,
+   after your output, not here; still apply the gate normally below.)
+
    MANDATORY FIRST CHECK — the CLINICAL REASONING above contains a block
    titled "--- CLUSTER_PHENOTYPE (backend-extracted from Stage 1
    reasoning — authoritative, do not re-derive) ---". This is a computed fact,
    not a narrative opinion — find this exact block FIRST, before reading
-   anything else in this section, and apply it mechanically. Do not go
-   looking for a "CLUSTER MATCH:"/"COVERAGE:" line elsewhere in the prose
-   reasoning — the labeled block is the only place this verdict is decided:
-     - Block says YES or PARTIAL -> criterion 1 is CLOSED. Satisfied. Not up
-       for re-evaluation. Do not re-read the phenotype fit narrative, the
-       craniofacial/dysmorphic/secondary-cluster details, or anything else in
-       the CLINICAL REASONING above to second-guess this — Stage 1 already
-       made this determination and it is not this stage's job to redo it.
+   anything else in this section, and apply the HARD GATE above mechanically.
+   Do not go looking for a "CLUSTER MATCH:"/"COVERAGE:" line elsewhere in the
+   prose reasoning — the labeled block is the only place this verdict is
+   decided, and it is not this stage's job to re-derive or second-guess it:
+     - YES or PARTIAL -> CLOSED. Satisfied. Not up for re-evaluation. Do not
+       re-read the phenotype fit narrative, the craniofacial/dysmorphic/
+       secondary-cluster details, or anything else in the CLINICAL REASONING
+       above to second-guess this — Stage 1 already made this determination.
        Skip straight to criterion 2 (PROBABLE PATHOGENICITY) below; that is
        the ONLY remaining question for this variant.
        Your Exclude-case line MUST NOT contain phenotype-linkage language at
        all in this case — no "no gene-phenotype link," "not linked to,"
-       "does not explain," "unrelated gene," "phenotype mismatch," or any
-       paraphrase of these. If you catch yourself writing any such phrase
-       after seeing a YES/PARTIAL block, delete it — Exclude-case may only
-       cite criterion-2 (pathogenicity) grounds in that case, or a truly
-       independent, separate track of evidence you can name and quote. A
-       PARTIAL verdict is not itself such grounds — it is criterion 1's own
+       "does not explain," "unrelated gene," "phenotype mismatch," "no
+       literature links [gene] to [feature]," "no match for [feature],"
+       "no [X] phenotype match," or any paraphrase of these. If you catch
+       yourself writing any such phrase after seeing a YES/PARTIAL block,
+       delete it — Exclude-case may only cite criterion-2 (pathogenicity)
+       grounds in that case, or the named independent-track exception above.
+       A PARTIAL verdict is not itself such grounds — it is criterion 1's own
        output, already closed above, not a new fact for this stage to weigh.
-     - Block says NO -> criterion 1 is NOT satisfied on phenotype grounds;
-       proceed to EXCLUDE unless a different track of evidence (e.g. a
-       separate LitVar2 variant-level hit) independently supplies a match
-       Stage 1 missed.
-     - Block says UNKNOWN, or the block is entirely absent (older-format
-       input) -> fall back to judging criterion 1 directly from the
-       sub-points below.
+     - INCIDENTAL -> do NOT EXCLUDE. This is not "no gene-phenotype link" —
+       it is a confirmed, different one. INCLUDE so the variant reaches the
+       conclusion stage and is reported under Actionable/Incidental findings;
+       evaluate criterion 2 (pathogenicity) normally. Your Include-case line
+       should note this is an incidental (non-presenting-phenotype) finding.
+     - NONE -> criterion 1 is NOT satisfied; proceed to EXCLUDE unless the
+       named independent-track exception above applies. Do not fall back to
+       judging the gene-phenotype link yourself from the sub-points below in
+       this case — those sub-points support criterion 1 only when the block
+       already reads YES/PARTIAL (see above) and you are checking a
+       candidate track for the independent-exception carve-out, not a
+       license to relitigate the whole gate from scratch.
+     - UNKNOWN, or the block is entirely absent (older-format input) -> this
+       is a parse/data gap, not a verdict — fall back to judging criterion 1
+       directly from the sub-points below, using the CLINICAL REASONING
+       prose.
    - Gene reported in literature or OMIM for this phenotype or a phenotypically
      overlapping condition, OR
    - ClinVar entries for this gene list the patient's disease as associated condition.
@@ -131,10 +174,21 @@ INCLUDE requires evidence for BOTH:
      version of this signal, OR
    - Strong ACMG criterion applies (PVS1, PS1, PS3, or equivalent), OR
    - Variant is rare (AF < 0.1%) with predicted functional impact (LoF, splice
-     disruption, or high CADD score ≥ 20) — ZYGOSITY MUST MATCH INHERITANCE MODE:
-     for a known AUTOSOMAL RECESSIVE gene, a single heterozygous LoF variant with
-     no second hit (no compound het, not homozygous) is INSUFFICIENT on its own —
-     treat as weak evidence, not strong, OR
+     disruption, or high CADD score ≥ 20) — ZYGOSITY MUST MATCH INHERITANCE MODE.
+     The gene's mode for this check comes ONLY from the "GENE INHERITANCE MODE
+     (backend-determined)" block above — never from a mode claimed in prose
+     evidence (a PubMed/websearch summary, a quoted OMIM sentence, or the
+     CLINICAL REASONING narrative), any of which can misstate or conflict with
+     the backend-resolved mode. If that block reads AR or XLR: a single
+     heterozygous LoF variant with no second hit (no compound het, not
+     homozygous) is INSUFFICIENT on its own — treat as weak evidence, not
+     strong. If it reads AD, XLD, AD_AR, XLD_XLR, or UNDEFINED (no inheritance
+     signal in CSV field, CGD table, or retrieved evidence) — do NOT invoke this
+     recessive-insufficiency reasoning at all, even if some other part of the
+     evidence text calls the gene "autosomal recessive"; a rare heterozygous
+     variant with strong functional impact stands on its own signal strength.
+     UNDEFINED is not a default to recessive — treat it as no mode constraint
+     applying to this check, OR
    - Variant is homozygous, or compound heterozygous with a second variant in the
      same gene, in a known recessive gene with low population frequency, OR
      the variant is a loss-of-function type (frameshift, nonsense, canonical

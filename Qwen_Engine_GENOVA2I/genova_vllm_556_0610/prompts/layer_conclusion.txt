@@ -77,6 +77,30 @@ in its header by design (gene name only); take the HGVS from its own
 "**Comment:**" prose instead, copied character-for-character. This is
 expected for that block kind, not a data error.
 
+SEGREGATION/MOI IDENTITY CHECK (mandatory, before writing any variant — a real
+observed failure this guards against): this layer's blocks above are
+concatenated back-to-back, several different variants at once, each with its
+own "**Segregation:**" line (de novo / inherited from mother / inherited from
+father / uncertain / etc). When writing THIS variant's segregation status,
+parental carrier information, or any de-novo/inheritance claim, you MUST
+re-read and copy it from THIS variant's own block only — its own "Parental
+data:", "Segregation:", and "**Comment:**" lines — never from a block above or
+below it in this prompt, even if that other block's wording would fit more
+smoothly into the sentence you are writing. A real observed failure: a
+block whose own Segregation line read "de novo" (both parents AB=0, no
+mention of either parent carrying the variant) was written up as "inherited
+from the father" and then used to override the block's own stated PS2
+application and total — because a *different* variant a few blocks away in
+the same layer-batch genuinely was inherited from the father, and that
+phrase bled into the wrong write-up. Before writing any inheritance-related
+clause, silently re-verify: does THIS EXACT variant's own block contain this
+exact wording? If not, do not write it — re-derive the clause from this
+variant's own "Segregation:"/"Parental data:" lines instead, and never
+"correct" or second-guess a block's own stated Segregation value or Total
+ACMG points based on your own re-reading — those are already-computed
+upstream and are copied verbatim, not re-derived, exactly like the point
+totals mentioned above.
+
 For each CAUSATIVE variant, write:
 
 [GENE] ([HGVS]) — [MOI tag — this names which layer PROCESSED the finding,

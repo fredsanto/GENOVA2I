@@ -1141,6 +1141,7 @@ class Pipeline:
                 reasoning_text=reasoning_only[i] + _zygosity_note_block(i) + _cluster_match_block(i),
                 llm=self._llm,
                 sibling_context_block=sib_block,
+                inheritance_mode_block=_inheritance_mode_block(i),
                 is_x_linked=moi.gene_chromosome(variants, [i]) == "X",
                 include_single_hit_recessive=not (is_hom_or_hemi or is_purely_dominant_mode),
                 include_compound_het_exception=bool(sib_block),

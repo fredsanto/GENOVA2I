@@ -3,11 +3,23 @@ pipeline/tools/litvar2.py — LitVar2-powered literature summarisation tool.
 
 Search strategy (gene-first, three tracks):
 
-  1. Gene + patient phenotype (primary — always runs when Gene is present)
-       Uses PubMed esearch with "{gene}[Gene] AND {disease_query}" to retrieve papers
-       co-mentioning the gene and the patient's disease. One API call, no LitVar2 loop.
+  1. Gene + generic disease/inheritance vocabulary (primary, PHENOTYPE-AGNOSTIC —
+     always runs when Gene is present)
+       Uses PubMed esearch with "{gene}[Gene] AND (disease OR syndrome OR <inheritance
+       terms>)" — deliberately NEVER the patient's phenotype or the LLM-resolved
+       self._disease_query — to retrieve papers describing what this gene causes, full
+       stop. One API call, no LitVar2 loop.
        - Zero hits  → explicit "not linked to disease" string (negative signal for triage)
-       - Non-zero   → titles → SLM filter → abstracts → SLM summary
+       - Non-zero   → titles → SLM filter (gene-disease relevance, not patient match) →
+         abstracts → SLM summary (objective inventory of the gene's conditions; does not
+         compare to or judge fit against the patient's case)
+       Comparing this evidence against the patient's own phenotype (CLUSTER_PHENOTYPE) is
+       Stage 1 reasoning's job (prompts/reasoning.txt) — it sees this block AND the patient
+       phenotype together. Anchoring retrieval to the patient's phenotype here would
+       pre-judge that comparison before Stage 1 runs, and — since disease-query resolution
+       and relevance-scoring are themselves LLM calls — make the evidence pool (and every
+       downstream stage, including MOI classification) sensitive to run-to-run LLM
+       sampling noise on top of the gene's actual literature. See _gene_search's docstring.
 
   2. Gene + known disease association (supplemental — runs when a disease term is available)
        Bridges the terminology gap between how the patient's condition is described and how
@@ -17,17 +29,25 @@ Search strategy (gene-first, three tracks):
          b. NHGRI Clinical Genomic Database (CGD) conditions for the gene — downloaded once
             per process and cached at the class level; empty dict on download failure.
        - No disease term available → track skipped silently
-       - Term found → titles → SLM filter → abstracts → SLM summary (framed on patient phenotype)
+       - Term found → titles → SLM filter (against the gene's own known condition, not
+         the patient's phenotype) → abstracts → SLM summary (framed on patient phenotype
+         for clinical readability)
 
-  3. Variant-level search (supplemental — runs when RS_ID is valid)
+  3. Variant-level search (supplemental — runs when RS_ID is valid; the one track still
+     scoped to the patient's own phenotype via self._disease_query — "does this paper
+     discuss THIS variant in the patient's condition" is a narrower, legitimately
+     patient-anchored question)
        Uses LitVar2 variant publications endpoint (purpose-built for rsID-level tracking).
        - No relevant papers → omitted from output
        - Papers found       → titles → SLM filter → abstracts → SLM summary
 
-  Tracks 1 and 2 answer different questions: track 1 asks "is this gene linked to this
-  patient's phenotype?", track 2 asks "is this gene's known disease related to what we see?".
-  All tracks that yield evidence are combined in the output, separated by dividers. Section
-  headers embed source and query for downstream traceability.
+  Tracks 1 and 2 now answer closely related questions from different angles: track 1 asks
+  "what does this gene cause, per generic disease/inheritance literature?", track 2 asks
+  "what does OMIM/CGD's own curated condition entry for this gene say?" — both feed the
+  same downstream phenotype comparison rather than pre-deciding it. All tracks that yield
+  evidence are combined in the output, separated by dividers. Section headers embed the
+  exact resolved query and source for downstream traceability, unconditionally (not just
+  on a no-hits fallback path).
 """
 
 import gzip
@@ -722,20 +742,38 @@ class LitVar2SummaryTool(SLMTool):
         """
         Primary gene-level search via PubMed esearch.
 
+        Deliberately PHENOTYPE-AGNOSTIC, same principle as run_condition_inventory()
+        below: the esearch query and the relevance-selection question are built from
+        generic disease/syndrome/inheritance vocabulary only — never from
+        context.patient_phenotype or self._disease_query (both patient-derived).
+        This track's job is to retrieve and describe the FULL set of conditions this
+        gene is known to cause; comparing that against the patient's own phenotype
+        (CLUSTER_PHENOTYPE) is Stage 1 reasoning's job (prompts/reasoning.txt), which
+        sees both this evidence block and the patient phenotype together. Anchoring
+        retrieval/selection/summarization to the patient's phenotype here pre-judges
+        that comparison before Stage 1 ever runs, and — since the disease-query
+        resolution and relevance-scoring are themselves LLM calls — makes the
+        evidence pool (and therefore every downstream stage, including MOI
+        classification) sensitive to run-to-run LLM sampling noise on top of the
+        gene's actual literature. self._disease_query remains used by the rsID-level
+        Track 3 search (_rsid_search) only, where "does this paper discuss THIS
+        variant in the context of the patient's condition" is a narrower, legitimately
+        patient-scoped question.
+
         Returns a positive evidence block when disease-relevant papers are found,
         or an explicit "not linked" message when none are — providing a clear
         negative signal for downstream reasoning and triage stages.
 
-        Output header shows PubMed's own querytranslation (the MeSH-expanded form of
-        the query) and pool counts so downstream stages can audit what was searched.
+        Output header always logs the exact resolved query used (not just on the
+        empty-hits fallback path) so downstream stages — and a human reading the
+        report — can audit what was searched without re-deriving it.
         """
-        # Broaden the phenotype terms with a bare "disease" OR-term so generic
-        # gene-disease association papers (that don't use the LLM-resolved
-        # phenotype wording) still match.
-        # Also OR-in inheritance-mode vocabulary so papers establishing how the
-        # gene's disease is inherited (needed downstream for the AR/AD/XLR gate
-        # and phase-check logic) are preferentially retrieved within the
-        # max_pmids-capped pool, not just papers matching the phenotype wording.
+        # Generic disease/syndrome/inheritance vocabulary only — see docstring above
+        # for why context.patient_phenotype/self._disease_query are never used here.
+        # Inheritance-mode vocabulary is included so papers establishing how the
+        # gene's disease is inherited (needed downstream for the AR/AD/XLR gate and
+        # phase-check logic) are preferentially retrieved within the max_pmids-capped
+        # pool, not just papers matching generic disease wording.
         #
         # Sort by relevance (the _esearch_gene default), not pub_date: with this
         # OR-heavy query almost any paper mentioning the gene near a disease/
@@ -747,13 +785,11 @@ class LitVar2SummaryTool(SLMTool):
         # _esearch_gene already adds a supplemental pub_date-sorted call when
         # total_count exceeds max_pmids, so recent literature is still covered.
         inheritance_terms = 'recessive OR dominant OR "x-linked" OR "de novo" OR biallelic'
-        disease_query = (
-            f"({self._disease_query}) OR disease OR {inheritance_terms}"
-            if self._disease_query else f"disease OR {inheritance_terms}"
-        )
+        disease_query = f'disease OR syndrome OR {inheritance_terms}'
         pmids, total_count, _ = self._esearch_gene(gene, disease_query)
 
-        # Header line shared by all output branches
+        # Header line shared by all output branches — always states the exact query
+        # used, unconditionally (see docstring: auditability, not just on fallback).
         def _header(extra: str = "") -> str:
             pool_note = (
                 f"{len(pmids)} retrieved (pub_date-sorted)"
@@ -762,25 +798,28 @@ class LitVar2SummaryTool(SLMTool):
             )
             base = (
                 f"PubMed gene-disease search for {gene}\n"
-                f"[{pool_note}{extra}]"
+                f"[query: {disease_query} | {pool_note}{extra}]"
             )
             return base
 
         if not pmids:
             # Retry with gene alone to distinguish "no literature at all" from
-            # "literature exists but disease term yielded no co-occurrences."
+            # "literature exists but none of it uses generic disease/inheritance
+            # vocabulary" (rare — e.g. a gene whose only papers are pure
+            # population-genetics/mechanism studies with no clinical framing yet).
             pmids_gene_only, total_count_gene_only, _ = self._esearch_gene(gene, None)
             if not pmids_gene_only:
                 return (
                     f"{_header()}\n"
                     f"NO DISEASE LINK — PubMed contains no publications mentioning {gene} "
-                    f"at all. This gene does not appear associated with the patient's phenotype."
+                    f"at all."
                 )
-            # Gene has literature but not matching this disease query — proceed through
-            # normal pipeline using the gene-only pool, with a header that signals the
-            # disease term was dropped so downstream reasoning interprets accordingly.
+            # Gene has literature but none matched the generic disease/inheritance
+            # vocabulary — proceed through normal pipeline using the gene-only pool,
+            # with a header that signals the vocabulary filter was dropped.
             pmids = pmids_gene_only
             total_count = total_count_gene_only
+            disease_query_used = disease_query
 
             def _header(extra: str = "") -> str:  # noqa: F811 — shadow outer _header
                 pool_note = (
@@ -790,7 +829,8 @@ class LitVar2SummaryTool(SLMTool):
                 )
                 return (
                     f"PubMed gene-only evidence for {gene} "
-                    f"(disease term '{self._disease_query}' yielded no hits — gene-only search)\n"
+                    f"(generic disease/inheritance vocabulary '{disease_query_used}' "
+                    f"yielded no hits — gene-only search)\n"
                     f"[{pool_note}{extra}]"
                 )
 
@@ -801,14 +841,24 @@ class LitVar2SummaryTool(SLMTool):
                 f"Gene-disease association could not be assessed (title fetch failed)."
             )
 
-        selected_pmids = self._select_relevant_pmids(titles, self._disease_query, context)
+        selection_question = (
+            f"Does this paper name or describe a specific disease, syndrome, or "
+            f"clinical condition caused by or associated with {gene} — any such "
+            f"condition, not limited to any particular patient's presentation? "
+            f"Score high for a paper establishing or discussing a real gene-disease "
+            f"relationship (mechanism, cohort, case report, inheritance pattern); "
+            f"score low for population-genetics-only, unrelated-pathway, or "
+            f"GWAS-risk-allele papers with no named clinical entity attached."
+        )
+        selected_pmids = self._select_relevant_pmids(titles, selection_question, context)
         logger.info("Gene search %s: selected %d/%d papers", gene, len(selected_pmids), len(titles))
 
         if not selected_pmids:
             return (
                 f"{_header(f', {len(titles)} screened, 0 relevant')}\n"
-                f"NO DISEASE LINK — No publications relevant to the patient's phenotype were found "
-                f"for {gene}. This gene does not appear associated with the patient's condition."
+                f"NO DISEASE LINK — No publications naming a specific disease/syndrome "
+                f"for {gene} were found. This gene does not appear to have an "
+                f"established clinical condition in the literature retrieved."
             )
 
         papers = self._fetch_abstracts(selected_pmids)
@@ -818,7 +868,15 @@ class LitVar2SummaryTool(SLMTool):
                 f"Gene-disease association could not be assessed."
             )
 
-        summary = self._summarise(papers, context.patient_phenotype, gene, context)
+        summary_question = (
+            f"Summarize what disease(s), syndrome(s), or clinical condition(s) these "
+            f"abstracts attribute to {gene} — every distinct one reported, not just "
+            f"the most prominent — including phenotypic features, inheritance "
+            f"pattern, and molecular mechanism where stated. Describe the "
+            f"gene-disease relationship(s) as reported in the literature; do not "
+            f"compare them to, or judge their fit against, any specific patient case."
+        )
+        summary = self._summarise(papers, summary_question, gene, context)
 
         source_lines = "\n".join(
             f"  - [PMID:{pmid}, {p.get('year', 'n.d.')}] {p['title']}  {p['url']}"
@@ -826,7 +884,7 @@ class LitVar2SummaryTool(SLMTool):
         )
         return (
             f"PubMed gene-disease evidence for {gene}\n"
-            f"[{len(titles)} screened, {len(papers)} selected]\n\n"
+            f"[query: {disease_query} | {len(titles)} screened, {len(papers)} selected]\n\n"
             f"{summary}\n\n"
             f"Sources:\n{source_lines}"
         )
@@ -1044,10 +1102,17 @@ class LitVar2SummaryTool(SLMTool):
         """
         Fetch literature evidence using a gene-first three-track strategy.
 
-        1. Gene + patient phenotype (primary): always runs when Gene is present.
+        1. Gene + generic disease/inheritance vocabulary (primary, phenotype-agnostic):
+           always runs when Gene is present. Retrieves and describes the full set of
+           conditions the gene causes per the literature — comparing that against the
+           patient's own phenotype (CLUSTER_PHENOTYPE) is Stage 1 reasoning's job, not
+           this tool's; see _gene_search's docstring.
         2. Gene + known disease term (supplemental): runs when OMIM_phenotype is not NA
            or CGD has an entry for the gene. Bridges phenotype terminology gaps.
-        3. Variant-level (supplemental): LitVar2 rsID endpoint when RS_ID is valid.
+        3. Variant-level (supplemental): LitVar2 rsID endpoint when RS_ID is valid —
+           the one track still scoped to the patient's own phenotype (self._disease_query),
+           since "does this paper discuss THIS variant in the patient's condition" is a
+           narrower, legitimately patient-anchored question.
 
         All tracks that yield evidence are combined, separated by dividers. Each block
         header embeds source and query for downstream traceability.

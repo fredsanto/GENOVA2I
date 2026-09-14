@@ -373,6 +373,7 @@ def run_second_triage(
     reasoning_text: str,
     llm: "LLMClient",
     sibling_context_block: str = "",
+    inheritance_mode_block: str = "",
     is_x_linked: bool = False,
     include_single_hit_recessive: bool = True,
     include_compound_het_exception: bool = True,
@@ -390,6 +391,25 @@ def run_second_triage(
                                  with ≥2 kept variants) — lets second_triage apply
                                  the compound-het safeguard instead of judging this
                                  variant in isolation. Empty string when not applicable.
+        inheritance_mode_block:  Backend-determined gene inheritance mode (AD/AR/
+                                 XLD/XLR/AD_AR/XLD_XLR/XL/UNDEFINED), same fact
+                                 string already handed to run_reasoning() (Call 1)
+                                 as `inheritance_mode_block` — re-passed here so
+                                 Call 2 sees it directly instead of only through
+                                 Call 1's own prose restatement of it. Without
+                                 this, a gene's actual backend-resolved mode (or
+                                 its UNDEFINED/unresolved status) was only visible
+                                 to second_triage secondhand, filtered through
+                                 whatever Call 1 chose to say about it — and a
+                                 conflicting inheritance-mode claim surfacing
+                                 elsewhere in the evidence text (e.g. a websearch
+                                 or literature summary asserting a different mode
+                                 than the backend CSV/CGD/LLM-resolved one) could
+                                 win out in Call 2's own reasoning, since Call 2
+                                 had no independent, authoritative fact to check
+                                 it against. See prompts/second_triage.txt for how
+                                 this block is used as the sole authoritative
+                                 mode source in the zygosity-vs-inheritance rule.
         is_x_linked:             True when this variant's gene resolved to chrX
                                  (moi.gene_chromosome(variants, [i]) == "X") —
                                  splices in the X-LINKED GENES SPECIFICALLY
@@ -437,6 +457,7 @@ def run_second_triage(
         .replace("{augmented_context}", variant_context)
         .replace("{reasoning}", reasoning_text)
         .replace("{sibling_context_block}", sibling_context_block)
+        .replace("{inheritance_mode_block}", inheritance_mode_block)
         .replace("{compound_het_exception_block}", compound_het_block)
         .replace("{literature_evidence_quality_block}", lit_quality_block)
         .replace("{single_hit_recessive_block}", single_hit_block)
