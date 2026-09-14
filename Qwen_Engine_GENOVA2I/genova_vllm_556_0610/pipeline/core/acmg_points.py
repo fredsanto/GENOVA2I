@@ -7,6 +7,14 @@ without adequate grounding and needs to keep the stated total consistent.
 
 import re
 
+# Stage-4 conclusion.py's own "**ACMG criteria:**" bullet block followed by
+# its "**ACMG points:** N → Label" total — the ONE canonical, already-
+# computed base score for a variant. See extract_base_acmg() below.
+_BASE_CRITERIA_BLOCK_RE = re.compile(
+    r"\*\*ACMG criteria:\*\*\s*\n((?:-[^\n]*\n?)+)\*\*ACMG points:\*\*\s*"
+    r"([-+]?\d+(?:\.\d+)?)\s*→\s*[A-Za-z /()]+"
+)
+
 _POINTS_LINE_RE = re.compile(
     r"(\*\*(?:Total )?ACMG points:\*\*\s*)([-+]?\d+(?:\.\d+)?)(\s*→\s*)([A-Za-z /()]+)"
 )
@@ -238,3 +246,47 @@ def recompute_and_fix_totals(text: str) -> str:
             )
 
     return "\n".join(lines)
+
+
+def extract_base_acmg(base_conclusion: str) -> tuple[str, float] | None:
+    """
+    Pulls the frozen, already-computed "**ACMG criteria:**" bullet list and
+    its "**ACMG points:** N → Label" total straight out of a variant's own
+    Stage-4 conclusion.py output (conclusions[i]) — the ONE canonical base
+    score for that variant. Every MOI layer (de novo, dominant, recessive,
+    X-linked) must splice in this exact block mechanically rather than
+    asking the SLM to re-transcribe or re-derive it from context on every
+    layer call.
+
+    A real observed failure this replaces: the same RYR1 variant's "Base
+    ACMG points" came out as three different numbers (8, 4, 2) across its
+    three MOI-layer blocks in one run, none of which even matched their own
+    listed criteria in that same block — despite every layer prompt
+    instructing "copy verbatim, do not invent" from the identical frozen
+    base_conclusion text. The model was re-deriving the number under each
+    layer's framing instead of copying it, and no mechanical check caught
+    the disagreement because each layer's "Base ACMG points" line was
+    validated only against criteria the model ALSO transcribed itself in
+    that same call — a check that can never catch a model that transcribes
+    a wrong number and a matching-but-wrong criteria list together.
+
+    Returns (block_text, points), where block_text is ready to splice in
+    as-is — a "**Base ACMG criteria:**" bullet list followed by a "**Base
+    ACMG points:** N → Label" line, with the label re-derived via
+    classify() (not copied from the base conclusion's own label) so it can
+    never disagree with N. Returns None if base_conclusion doesn't contain
+    the expected Stage-4 shape (caller should then fall back to whatever
+    the LLM produces rather than injecting nothing).
+    """
+    m = _BASE_CRITERIA_BLOCK_RE.search(base_conclusion)
+    if not m:
+        return None
+    bullets, points_str = m.groups()
+    points = float(points_str)
+    block = (
+        "**Base ACMG criteria (ground truth — mechanically copied from this "
+        "variant's own Stage-4 conclusion; not re-derived at this layer):**\n"
+        f"{bullets.rstrip()}\n"
+        f"**Base ACMG points:** {_sum_str(points)} → {classify(points)}"
+    )
+    return block, points

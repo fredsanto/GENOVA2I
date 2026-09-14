@@ -140,23 +140,23 @@ Use exactly this format:
 **Parental carrier status:** [what evidence IS present about parents being unaffected carriers, or "no parental phenotype data available"]
 **Recommendation:** [ONLY when step 5 applies — singleton, no parental AB data at all for either variant: "Parental/segregation testing recommended to confirm phase (cis vs. trans) before this compound heterozygous pair can be considered diagnostic." Omit this line entirely when step 5 does not apply.]
 
+DO NOT write "Base ACMG criteria" or "Base ACMG points" or "Total ACMG
+points" for either variant yourself — that block is spliced in mechanically
+by the pipeline straight from each variant's own Stage-4 conclusion, never
+re-derived or transcribed at this layer. A real observed failure this
+avoids: the same variant's "Base ACMG points" came out as three different
+numbers across its three MOI-layer blocks in one run because each layer
+was asked to copy the number "verbatim" and instead re-derived it under its
+own framing. Your job here is ONLY the recessive-specific delta (PM3) and
+the joint comment — write nothing else about base scoring.
+
 ## Variant A — {variant_a_label}
 **Recessive criteria applied:** [PM3, if applicable, with justification citing Variant B's classification] [or "PM3 (hypothesis — trans phase not confirmed), if applicable under step 2(b), with justification citing Variant B's classification"] [or "None — partner does not meet Likely Pathogenic threshold"]
-**Base ACMG criteria (copied verbatim from Variant A's BASE CONCLUSION own "ACMG criteria:" list — reproduce every line exactly as written there, do not summarize, drop, rename, or invent any):**
-- [Criterion] [Strength] (+/-N pts): [justification, copied verbatim]
-[repeat for every criterion listed in Variant A's BASE CONCLUSION]
-**Base ACMG points:** [copy the numeric value from Variant A's BASE CONCLUSION "ACMG points:" line verbatim]
 **Recessive delta:** [+2 confirmed / +2 hypothesis / +0]
-**Total ACMG points:** [base + delta] → [classification from the thresholds below — prefix with "Potential " when the delta came from a step 2(b) hypothesis-only PM3, e.g. "Potential Likely Pathogenic"]
 
 ## Variant B — {variant_b_label}
 **Recessive criteria applied:** [PM3, if applicable, with justification citing Variant A's classification] [or "PM3 (hypothesis — trans phase not confirmed), if applicable under step 2(b), with justification citing Variant A's classification"] [or "None — partner does not meet Likely Pathogenic threshold"]
-**Base ACMG criteria (copied verbatim from Variant B's BASE CONCLUSION own "ACMG criteria:" list — reproduce every line exactly as written there, do not summarize, drop, rename, or invent any):**
-- [Criterion] [Strength] (+/-N pts): [justification, copied verbatim]
-[repeat for every criterion listed in Variant B's BASE CONCLUSION]
-**Base ACMG points:** [copy the numeric value from Variant B's BASE CONCLUSION "ACMG points:" line verbatim]
 **Recessive delta:** [+2 confirmed / +2 hypothesis / +0]
-**Total ACMG points:** [base + delta] → [classification from the thresholds below — prefix with "Potential " when the delta came from a step 2(b) hypothesis-only PM3, e.g. "Potential Likely Pathogenic"]
 
 **Comment:** [2-3 sentences on the joint recessive mechanism — do not frame either variant as superior to the other. If either variant carries a hypothesis-only PM3, state plainly that the compound-het call is a working hypothesis pending trans-phase confirmation, not a confirmed diagnosis.]
 

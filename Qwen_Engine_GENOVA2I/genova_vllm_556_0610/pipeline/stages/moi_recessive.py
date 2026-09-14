@@ -31,7 +31,12 @@ from typing import TYPE_CHECKING
 
 from pipeline.core.citations import validate_citations
 from pipeline.core.clinvar_reference import append_clinvar_reference, append_clinvar_references
-from pipeline.core.acmg_points import relabel_all_points_lines, recompute_and_fix_totals
+from pipeline.core.acmg_points import (
+    classify,
+    extract_base_acmg,
+    relabel_all_points_lines,
+    recompute_and_fix_totals,
+)
 from pipeline.core.acmg_bs2_recessive import validate_bs2_homozygous_unaffected_parent
 
 if TYPE_CHECKING:
@@ -42,7 +47,7 @@ logger = logging.getLogger(__name__)
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "moi_recessive.txt"
 _SOLO_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "moi_recessive_homozygous.txt"
 
-MAX_NEW_TOKENS_RECESSIVE = 900
+MAX_NEW_TOKENS_RECESSIVE = 1800
 MAX_NEW_TOKENS_RECESSIVE_SOLO = 600
 
 # A compound-het pair is only a confirmed P/LP biallelic diagnosis if BOTH
@@ -57,6 +62,72 @@ _CAUSATIVE_THRESHOLD = 6.0
 _TOTAL_POINTS_RE = re.compile(
     r"\*\*Total ACMG points:\*\*\s*([-+]?\d+(?:\.\d+)?)\s*→"
 )
+
+_DELTA_LINE_RE = re.compile(
+    r"(\*\*Recessive delta:\*\*\s*\[?\s*([-+]?\d+(?:\.\d+)?)\s*(confirmed|hypothesis)?\s*\]?[^\n]*)"
+)
+
+# End of one variant's section: the next "## Variant" header, or the
+# "**Comment:**" line that follows both variants — whichever comes first.
+_SECTION_END_RE = re.compile(r"\n##\s*Variant|\n\*\*Comment:\*\*")
+
+
+def _fmt(n: float) -> str:
+    return str(int(n)) if n == int(n) else str(n)
+
+
+def _inject_base_and_total(pair_block: str, marker: str, base_conclusion: str) -> str:
+    """
+    Splices the deterministic "Base ACMG criteria"/"Base ACMG points" block
+    (extract_base_acmg — mechanically copied from this variant's own Stage-4
+    conclusion) plus a Python-computed "Total ACMG points" line right after
+    this variant's "**Recessive delta:**" line, replacing whatever the LLM
+    itself may have tried to write for base scoring (the prompt now tells it
+    not to, but this is the enforcement, not the prompt wording). No-op
+    (with a warning) if the marker, its delta line, or the base conclusion's
+    own ACMG block can't be found — degrades to whatever the LLM produced
+    rather than corrupting the block further.
+    """
+    start = pair_block.find(marker)
+    if start == -1:
+        logger.warning(
+            "[MOIRecessive] Marker %r not found — could not inject base ACMG block.",
+            marker,
+        )
+        return pair_block
+    end_m = _SECTION_END_RE.search(pair_block, start + len(marker))
+    section_end = end_m.start() if end_m else len(pair_block)
+    section = pair_block[start:section_end]
+
+    dm = _DELTA_LINE_RE.search(section)
+    if not dm:
+        logger.warning(
+            "[MOIRecessive] No 'Recessive delta' line found for %r — could not "
+            "inject base ACMG block.",
+            marker,
+        )
+        return pair_block
+    delta_line, delta_str, delta_kind = dm.groups()
+    delta = float(delta_str)
+
+    extracted = extract_base_acmg(base_conclusion)
+    if extracted is None:
+        logger.warning(
+            "[MOIRecessive] Could not extract base ACMG block from base_conclusion "
+            "for %r — could not inject.",
+            marker,
+        )
+        return pair_block
+    base_block, base_points = extracted
+
+    total = base_points + delta
+    label = classify(total)
+    if delta_kind and delta_kind.lower() == "hypothesis":
+        label = f"Potential {label}"
+
+    insertion = f"{delta_line}\n{base_block}\n**Total ACMG points:** {_fmt(total)} → {label}"
+    new_section = section[: dm.start()] + insertion + section[dm.end() :]
+    return pair_block[:start] + new_section + pair_block[section_end:]
 
 
 def _joint_compound_het_status(pair_block: str) -> str | None:
@@ -218,9 +289,14 @@ def run_pair(
         user=user_prompt,
         max_tokens=MAX_NEW_TOKENS_RECESSIVE,
     )
-    # Re-sum each variant's copied-verbatim base criteria against its own
-    # "Base ACMG points" line before relabeling — catches a base conclusion
-    # that already stated a wrong total (see acmg_points.recompute_and_fix_totals).
+    # Splice in the deterministic, mechanically-copied Base ACMG block +
+    # Total for each variant (see extract_base_acmg's docstring) — the LLM
+    # is no longer trusted to transcribe or re-derive these numbers itself.
+    result = _inject_base_and_total(result, "## Variant A", variant_a_base_conclusion)
+    result = _inject_base_and_total(result, "## Variant B", variant_b_base_conclusion)
+    # Safety net only at this point (base/total are already correct by
+    # construction above) — still guards against a malformed LLM response
+    # that fell through the injection's own fallback-to-unmodified path.
     result = recompute_and_fix_totals(result)
     result = relabel_all_points_lines(result)
     full_context = variant_a_context + "\n" + variant_b_context + "\n" + variant_a_base_conclusion + "\n" + variant_b_base_conclusion
