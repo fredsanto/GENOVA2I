@@ -5,7 +5,10 @@ line parsing/rewriting, used by every mechanical ACMG-criterion validator
 without adequate grounding and needs to keep the stated total consistent.
 """
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 # Stage-4 conclusion.py's own "**ACMG criteria:**" bullet block followed by
 # its "**ACMG points:** N → Label" total — the ONE canonical, already-
@@ -59,18 +62,93 @@ _CLASSIFICATION_LINE_RE = re.compile(
 # require.
 _CRITERION_TAG_RE = re.compile(r"\[[A-Za-z\s]+,\s*([+-]?\d+(?:\.\d+)?)\s*(?:pts?)?\]")
 
-# moi_*.py's own MOI-layer delta line, e.g. "**Recessive delta:** +2" /
-# "**De novo delta:** +4" / "**X-linked delta:** +1" — sits between a
-# "**Base ACMG points:**" line and the "**Total ACMG points:**" line that
-# should equal their sum.
-#
-# The label character class must allow an internal space (e.g. "De novo") —
-# a real observed failure: [A-Za-z-]+ cannot span "De novo" (two words), so
-# this regex silently never matched the De Novo layer's own delta line —
-# the most common layer — and the Base+delta reconciliation pass below that
-# depends on this match (see recompute_and_fix_totals) silently no-op'd for
-# every De Novo layer block, leaving a stale/wrong stated Total uncorrected.
-_DELTA_LINE_RE = re.compile(r"\*\*[A-Za-z][A-Za-z -]* delta:\*\*\s*([+-]?\d+(?:\.\d+)?)")
+# Every standard ACMG/AMP criterion code.
+_CRITERION_CODE_RE = r"(?:PVS1|PS[1-4]|PM[1-6]|PP[1-5]|BA1|BS[1-4]|BP[1-7])"
+
+# One applied-criterion bullet, in ANY of the shapes the different prompt
+# templates (and the SLM's own free variation on them) actually render:
+#   "- PVS1 [VeryStrong, +8]: ..."
+#   "*   **PS2** (Strong, +4 pts): ..."
+#   "[PM6] (Moderate, +2 pts): ..."
+#   "PM3 (Supporting, +0.5 pts): ..."
+# — an optional leading bullet marker, optional bold/bracket wrapping
+# around the code, then a strength+points tag in either [] or () directly
+# after it. Deliberately position-independent: matched anywhere a line
+# starts with a code+tag pair, not anchored to a specific header or a
+# fixed number of lines above a total line.
+_CRITERION_MENTION_RE = re.compile(
+    r"(?:^|\n)[ \t]*[-*•]?[ \t]*\**\[?\b(" + _CRITERION_CODE_RE + r")\b\]?\**"
+    r"[ \t]*[\(\[][A-Za-z][A-Za-z \t]*,\s*([+-]?\d+(?:\.\d+)?)\s*(?:pts?)?\s*[\)\]]"
+)
+
+
+def gather_criteria(text: str) -> list[tuple[str, float]]:
+    """
+    Scans `text` for every ACMG-criterion bullet (any rendered shape — see
+    _CRITERION_MENTION_RE) and returns (code, points) pairs in first-seen
+    order, one per unique code.
+
+    Exists because the position-based approach (walk back N contiguous
+    non-blank lines above a stated total, as recompute_and_fix_totals used
+    to) breaks the instant the SLM's own formatting deviates even slightly
+    from the prompt template's exact layout (an extra blank line, a
+    differently-worded label) — a fragility that has silently disabled the
+    arithmetic safety net multiple times (see recompute_and_fix_totals's
+    docstring). This instead finds every criterion mention in the text
+    regardless of where it sits, so blank lines, reordering, or reworded
+    headers around it don't matter.
+
+    A criterion code mentioned more than once with the SAME point value is
+    silently deduplicated (redundant restatement, e.g. the SLM echoing a
+    criterion in prose after already listing it as a bullet). A code
+    mentioned twice with DIFFERENT point values is a genuine inconsistency
+    in the SLM's own output — the first occurrence wins and the disagreement
+    is logged, rather than silently summing or averaging two numbers that
+    can't both be right.
+    """
+    seen: dict[str, float] = {}
+    order: list[str] = []
+    for code, points_str in _CRITERION_MENTION_RE.findall(text):
+        points = float(points_str)
+        if code in seen:
+            if seen[code] != points:
+                logger.warning(
+                    "acmg_points.gather_criteria: %s mentioned twice with "
+                    "different point values (%s vs %s) in the same block — "
+                    "keeping the first, dropping the duplicate",
+                    code, seen[code], points,
+                )
+            continue
+        seen[code] = points
+        order.append(code)
+    return [(code, seen[code]) for code in order]
+
+
+def sum_criteria(text: str) -> float:
+    """Sum of gather_criteria(text)'s deduplicated per-code point values."""
+    return sum(points for _, points in gather_criteria(text))
+
+
+# moi_*.py's own "**Base ACMG criteria (...):**" header — the boundary a
+# Base-line's criteria are scoped to start from (excludes that layer's own
+# earlier "<Layer> criteria applied" bullet, e.g. PS2, which must count
+# toward the Total line but not the Base line). Worded slightly differently
+# across templates ("BASE CONCLUSION's" vs "the BASE CONCLUSION's") — match
+# on the stable "Base ACMG criteria" prefix only.
+_BASE_HEADER_RE = re.compile(r"\*\*Base ACMG criteria\b[^\n]*\*\*")
+
+# The header that opens a self-contained "one variant's worth of ACMG
+# criteria" sub-block, in either of the two shapes the pipeline renders:
+# moi_*.py's "**<Layer> criteria applied:**" (e.g. "De novo criteria
+# applied") or conclusion.py's/final_conclusion.py's own "**ACMG
+# criteria:**". Used to bound how far back recompute_and_fix_totals()
+# looks for criteria belonging to a given total line, so a concatenated
+# multi-variant text (final_conclusion.py's combined output, or a
+# compound-het pair's two variant blocks in one moi_recessive.py result)
+# doesn't pull an earlier variant's criteria into a later variant's total.
+_BLOCK_START_RE = re.compile(
+    r"\*\*(?:[A-Za-z][A-Za-z ]* criteria applied|ACMG criteria):\*\*"
+)
 
 # (inclusive lower bound, label) — highest first; matches the thresholds
 # block at the bottom of prompts/conclusion.txt.
@@ -142,11 +220,11 @@ def _sum_str(n: float) -> str:
 
 def recompute_and_fix_totals(text: str) -> str:
     """
-    Deterministically re-sums each criterion's own stated point tag (e.g.
-    the "+4" in "PS3 [Strong, +4]:") over the contiguous run of criterion
-    bullet lines immediately above a stated total line, and overwrites that
-    total — and its classification label — whenever it disagrees, instead
-    of trusting the SLM's own arithmetic on it.
+    Deterministically re-sums the ACMG criteria that belong to each stated
+    total line via gather_criteria() — a position-independent scan for
+    every criterion mention in the relevant scope, deduplicated by code —
+    and overwrites that total, and its classification label, whenever it
+    disagrees with the SLM's own stated number.
 
     A real, RECURRING observed failure — the exact scenario conclusion.txt's
     own "real past failure" warning already describes, which happened again
@@ -158,94 +236,90 @@ def recompute_and_fix_totals(text: str) -> str:
     exist and are followed only sometimes — this makes the check
     unconditional.
 
-    Handles all three rendered total-line formats used across the pipeline:
-    "**ACMG points:**"/"**Base ACMG points:** N -> Label" (a criteria-bullet
-    list precedes these directly — conclusion.py's own total, and each
-    moi_*.py layer's copied-verbatim base total), "**Total ACMG points:** N
-    -> Label" (a "**<Layer> delta:** +/-D" line precedes this instead of
-    bullets — reconciled as base + delta in a second pass below, using the
-    (possibly just-corrected) Base line), and "**ACMG classification:**
-    Label (N pts total)" (final_conclusion.py's per-variant blocks, bullets
-    precede directly like the first case).
+    This replaces an earlier, position-based version (walk back over the
+    contiguous run of non-blank lines immediately above the total) that
+    broke silently the instant the SLM's own rendering deviated even
+    slightly from the prompt template's exact spacing — e.g. a single blank
+    line the SLM inserted before "**Base ACMG points:**" stopped the
+    backward scan before it ever reached the criteria bullets, leaving a
+    stale, wrong total (and the classification derived from it) shipped
+    unchanged, with no error or warning anywhere. gather_criteria() instead
+    finds every criterion mention within a bounded scope regardless of
+    exactly where it sits relative to blank lines or restated delta lines.
+
+    Handles all three rendered total-line formats used across the pipeline,
+    each with its own scope:
+    - "**ACMG points:**" (conclusion.py) / "**ACMG classification:** Label
+      (N pts total)" (final_conclusion.py) — scoped from the nearest
+      preceding "**ACMG criteria:**" header to the total line, so a
+      concatenated multi-variant text (final_conclusion.py's combined
+      output) doesn't pull an earlier variant's criteria into this one's
+      total.
+    - "**Base ACMG points:** N" (each moi_*.py layer's copied-verbatim base
+      total) — scoped from the nearest preceding "**Base ACMG criteria**"
+      header, which deliberately excludes that layer's own earlier
+      "<Layer> criteria applied" delta bullet (e.g. PS2) — the Base line
+      must reflect the base score alone.
+    - "**Total ACMG points:** N" (moi_*.py's base+delta total) — scoped
+      from the nearest preceding "**<Layer> criteria applied:**" header,
+      which — unlike the Base line's scope — DOES include that layer's own
+      delta bullet, giving base + delta in one pass without needing a
+      separate reconciliation step.
+    Falls back to scoping from the start of `text` if no bounding header is
+    found, matching the old function's behavior for any block shape that
+    predates this convention.
     """
-    lines = text.split("\n")
 
-    def _sum_preceding_criteria(idx: int) -> float | None:
-        total = 0.0
-        found_any = False
-        j = idx - 1
-        while j >= 0:
-            line = lines[j]
-            if not line.strip():
-                break
-            tags = _CRITERION_TAG_RE.findall(line)
-            if not tags:
-                break
-            total += sum(float(t) for t in tags)
-            found_any = True
-            j -= 1
-        return total if found_any else None
+    out = text
 
-    for i, line in enumerate(lines):
-        m = _POINTS_LINE_RE.search(line)
-        if m:
-            actual = _sum_preceding_criteria(i)
-            if actual is not None and actual != float(m.group(2)):
-                lines[i] = (
-                    line[: m.start()]
-                    + f"{m.group(1)}{_sum_str(actual)}{m.group(3)}{classify(actual)}"
-                    + line[m.end() :]
-                )
-            continue
-        mb = _BASE_POINTS_LINE_RE.search(line)
-        if mb:
-            actual = _sum_preceding_criteria(i)
-            if actual is not None and actual != float(mb.group(2)):
-                # Normalize to "N → Label" on correction regardless of
-                # whether the original line had a label at all (the real
-                # template format never does) — always write a fresh,
-                # correct one once a correction fires; leave untouched
-                # (bare or labeled, whichever it already was) when no
-                # correction is needed.
-                lines[i] = (
-                    line[: mb.start()]
-                    + f"{mb.group(1)}{_sum_str(actual)} → {classify(actual)}"
-                    + line[mb.end() :]
-                )
-            continue
-        m2 = _CLASSIFICATION_LINE_RE.search(line)
-        if m2:
-            actual = _sum_preceding_criteria(i)
-            if actual is not None and actual != float(m2.group(4)):
-                lines[i] = (
-                    line[: m2.start()]
-                    + f"{m2.group(1)}{classify(actual)}{m2.group(3)}{_sum_str(actual)}{m2.group(5)}"
-                    + line[m2.end() :]
-                )
+    # (regex to match the total line, header marking the start of its
+    #  criteria scope, index of the group holding the currently-stated
+    #  numeric value, rewrite function given (match, corrected_total))
+    passes = (
+        (
+            _BASE_POINTS_LINE_RE,
+            _BASE_HEADER_RE,
+            2,
+            lambda m, actual: f"{m.group(1)}{_sum_str(actual)} → {classify(actual)}",
+        ),
+        (
+            _POINTS_LINE_RE,
+            _BLOCK_START_RE,
+            2,
+            lambda m, actual: f"{m.group(1)}{_sum_str(actual)}{m.group(3)}{classify(actual)}",
+        ),
+        (
+            _CLASSIFICATION_LINE_RE,
+            _BLOCK_START_RE,
+            4,
+            lambda m, actual: (
+                f"{m.group(1)}{classify(actual)}{m.group(3)}"
+                f"{_sum_str(actual)}{m.group(5)}"
+            ),
+        ),
+    )
 
-    # Second pass: reconcile "**Total ACMG points:**" against
-    # base-line-just-above-it + delta-line-in-between, now that the base
-    # line has already been corrected above if it needed it. Only fires
-    # when both neighbours are actually present in that exact shape.
-    for i, line in enumerate(lines):
-        if "Total ACMG points:" not in line:
-            continue
-        mt = _POINTS_LINE_RE.search(line)
-        if not mt or i < 2:
-            continue
-        md = _DELTA_LINE_RE.search(lines[i - 1])
-        mb = _BASE_POINTS_LINE_RE.search(lines[i - 2])
-        if not md or not mb:
-            continue
-        expected = float(mb.group(2)) + float(md.group(1))
-        if expected != float(mt.group(2)):
-            lines[i] = (
-                line[: mt.start()]
-                + f"{mt.group(1)}{_sum_str(expected)}{mt.group(3)}{classify(expected)}"
-                + line[mt.end() :]
-            )
+    for regex, header_re, value_group, fmt in passes:
+        pos = 0
+        pieces = []
+        for m in regex.finditer(out):
+            pieces.append(out[pos : m.start()])
+            start = 0
+            for hm in header_re.finditer(out, 0, m.start()):
+                start = hm.end()
+            crit = gather_criteria(out[start : m.start()])
+            if crit:
+                actual = sum(v for _, v in crit)
+                if actual != float(m.group(value_group)):
+                    pieces.append(fmt(m, actual))
+                    pos = m.end()
+                    continue
+            pieces.append(m.group(0))
+            pos = m.end()
+        pieces.append(out[pos:])
+        out = "".join(pieces)
 
-    return "\n".join(lines)
+    return out
 
 
 def extract_base_acmg(base_conclusion: str) -> tuple[str, float] | None:
