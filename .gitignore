@@ -5,3 +5,7 @@ __pycache__/
 .connection
 *.bak
 *.bak2
+*.sif
+*.egg-info/
+webapp/build/
+webapp/dist/

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "genova2i-webapp"
+version = "0.1.0"
+description = "ServerQwen web UI / proxy client — talks to the GPU-side pipeline server over HTTP, no torch/vLLM/CUDA dependency."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.scripts]
+genova2i-webapp = "genova2i_webapp.server:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+genova2i_webapp = ["templates/*.html"]
