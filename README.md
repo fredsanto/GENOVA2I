@@ -2,6 +2,8 @@
 
 FastAPI web server exposing a genomic variant analysis pipeline powered by **Qwen3.5-9B** running under **vLLM**. Designed for a SLURM-managed HPC cluster (GPU nodes) with SSH tunnel access from a laptop.
 
+`$PROJECT_ROOT` below is the directory containing this `ServerQwen/` repo and the `.venv_qwen/` virtualenv, e.g. `export PROJECT_ROOT=/path/to/GenMasterAI`.
+
 Git username: `fredsanto`
 
 ---
@@ -217,7 +219,7 @@ detail and `SOP_ACMG_SF.md` for the clinical procedure.
 
 ```bash
 # On the login node
-cd /work/PRTNR/CHUV/MED/fsantoni1/pitnet/AI/JING/GenMasterAI/ServerQwen
+cd $PROJECT_ROOT/ServerQwen
 sbatch launch_qwen.sh
 ```
 
@@ -328,7 +330,7 @@ checkpoints) before deleting anything.
 One-time setup (login node):
 
 ```bash
-/work/PRTNR/CHUV/MED/fsantoni1/pitnet/AI/JING/GenMasterAI/.venv_qwen/bin/pip install -r requirements.txt
+$PROJECT_ROOT/.venv_qwen/bin/pip install -r requirements.txt
 ```
 
 The full pipeline (direct mode) uses the conda env at `Qwen_Engine_GENOVA2I/env_vllm_0606`, which already includes vLLM and all pipeline dependencies.
@@ -360,8 +362,8 @@ The `job_id` is saved to `localStorage` on submit. On page refresh:
 ## Running Tests
 
 ```bash
-cd /work/PRTNR/CHUV/MED/fsantoni1/pitnet/AI/JING/GenMasterAI/ServerQwen
-/work/PRTNR/CHUV/MED/fsantoni1/pitnet/AI/JING/GenMasterAI/.venv_qwen/bin/python test_server.py
+cd $PROJECT_ROOT/ServerQwen
+$PROJECT_ROOT/.venv_qwen/bin/python test_server.py
 ```
 
 Tests: health check, web UI, analyze submission, SSE streaming, result polling, empty CSV rejection, invalid job ID, 5 concurrent jobs.
