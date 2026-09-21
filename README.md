@@ -1,6 +1,6 @@
 # ServerQwen — Qwen Variant Analysis Server
 
-FastAPI web server exposing a genomic variant analysis pipeline powered by **Qwen3.5-9B** running under **vLLM**. Designed for the UNIL Curnagl HPC cluster (SLURM + GPU nodes) with SSH tunnel access from a laptop.
+FastAPI web server exposing a genomic variant analysis pipeline powered by **Qwen3.5-9B** running under **vLLM**. Designed for a SLURM-managed HPC cluster (GPU nodes) with SSH tunnel access from a laptop.
 
 Git username: `fredsanto`
 
@@ -47,7 +47,7 @@ same fix to those is the logical next step if it recurs there.
 Laptop browser
      │  SSH tunnel
      ▼
-Login node (curnagl.dcsr.unil.ch)
+Login node (cluster login host)
      │
      ▼
 Compute node (dnagpuXXX) :8002  ←── server_qwen.py (FastAPI/uvicorn)
@@ -258,7 +258,7 @@ tail -f server_qwen_<JOBID>.log
 ### 3. Open SSH tunnel from your laptop
 
 ```bash
-ssh -N -L 8002:<COMPUTE_NODE>:8002 fsantoni1@curnagl.dcsr.unil.ch
+ssh -N -L 8002:<COMPUTE_NODE>:8002 <user>@<cluster-login-host>
 ```
 
 `<COMPUTE_NODE>` is printed in the log and written to `.connection`. Or use the helper script (reads `.connection` automatically):
@@ -282,7 +282,7 @@ http://localhost:8002
 ### vLLM fails to start: `[launch] ERROR: vLLM did not become ready within 600s`
 
 Check `vllm_server.log` for the actual root cause (the launch log only reports
-the timeout, not why). A real case seen on Curnagl:
+the timeout, not why). A real case seen on the cluster:
 
 ```
 OSError: [Errno 122] Disk quota exceeded: '.../.cache/vllm/torch_compile_cache/.../inductor_cache/...'
