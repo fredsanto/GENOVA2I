@@ -22,6 +22,7 @@ from pipeline.tools.websearch import (
     DEFAULT_MAX_CHARS,
 )
 from pipeline.core.acmg_sf import is_pathogenic_clinvar
+from pipeline.tools.clinvar_gene_stats import comment_functional_pmids
 
 logger = logging.getLogger(__name__)
 
@@ -139,15 +140,6 @@ class NCBIFetchTool(NetworkTool):
 
     # ── ClinVar variation ──────────────────────────────────────────────────────
 
-    # Words that mark a submitter <Comment> as carrying functional/experimental
-    # evidence (PS3-relevant) rather than a generic classification remark.
-    _FUNCTIONAL_MARKERS = (
-        "functional stud", "in vitro", "in vivo", "assay", "minigene",
-        "splicing assay", "reporter assay", "enzymatic activity",
-        "protein function", "functional assay", "functional analysis",
-        "functional characterization", "experimentally",
-    )
-
     # Normalizes whatever GermlineClassification text ClinVar submitters used
     # into one of the 5 standard tally buckets.
     _CLASS_BUCKETS = {
@@ -220,10 +212,20 @@ class NCBIFetchTool(NetworkTool):
                 line = f"- [{desc}] source: {submitter} ({scv})"
                 if pmids:
                     line += f" — cites PMID: {', '.join(pmids[:8])}"
+
+                # PS3 trigger: the Comment reports functional work and the
+                # submission carries a reference for it (see
+                # clinvar_gene_stats.comment_functional_pmids). No reference, no tag.
+                tag = ""
+                ref_pmids = comment_functional_pmids(comment, pmids) if comment else []
+                if ref_pmids:
+                    tag = (" [functional evidence stated in submitter comment, citing "
+                           + ", ".join(f"PMID:{p}" for p in ref_pmids[:5]) + "]")
+
+                if tag:
+                    line += tag
                 if comment:
-                    tag = " [mentions functional/experimental evidence]" if \
-                        any(m in comment.lower() for m in self._FUNCTIONAL_MARKERS) else ""
-                    line += f"{tag}\n  Rationale: {comment[:600]}"
+                    line += f"\n  Rationale: {comment[:600]}"
                 pl_evidence.append(line)
 
         total = sum(counts.values())
@@ -246,15 +248,15 @@ class NCBIFetchTool(NetworkTool):
         return "\n\n".join(parts)
 
     # Matches the cDNA-change token out of a combined/compound HGVS string,
-    # e.g. "NM_000330:exon4:c.214G>A:p.E72K" -> "c.214G>A". ClinVar's own
+    # e.g. "NM_000000:exon4:c.100A>C:p.K34T" -> "c.100A>C". ClinVar's own
     # esearch [variant name] index only matches this clean token — the full
     # colon-glued compound string comes back as one unsplittable phrase with
-    # zero hits, even when the variant is in ClinVar (verified: RS1 c.214G>A
-    # is variation ID 9888, findable only via the bare cDNA token). "(" also
-    # excluded — a "c.1292T>A(p.Val431Asp)"-style string otherwise swallows
+    # zero hits, even when the variant is in ClinVar (verified live:
+    # such a variant was findable only via the bare cDNA token). "(" also
+    # excluded — a "c.200T>A(p.Val67Asp)"-style string otherwise swallows
     # the trailing protein annotation into the token, producing an
-    # unmatchable esearch term (verified: LARS1 c.1292T>A / Variation ID
-    # 431849 silently failed to resolve until this exclusion was added).
+    # unmatchable esearch term (verified live: a real
+    # ClinVar variant silently failed to resolve until this exclusion was added).
     _CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;()]+")
 
     def resolve_clinvar_id(self, gene: str, hgvs: str) -> str | None:

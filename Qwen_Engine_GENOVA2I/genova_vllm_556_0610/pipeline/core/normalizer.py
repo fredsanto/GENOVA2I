@@ -166,6 +166,13 @@ def _clean(v) -> str:
     return "NA" if s in ("", "nan", "NaN", "None", "none", "NULL", "null", ".") else s
 
 
+def _collapse_repeated_gene(raw: str) -> str:
+    parts = [p.strip() for p in re.split(r"[;,|]", raw) if p.strip()]
+    if len(parts) > 1 and len({p.upper() for p in parts}) == 1:
+        return parts[0]
+    return raw
+
+
 def _normalize_type(raw: str) -> str:
     """Map ANNOVAR ExonicFunc/Func values to pipeline Type vocabulary."""
     return _TYPE_MAP.get(raw.strip().lower(), raw)
@@ -403,21 +410,21 @@ def _map_columns_old(df: pd.DataFrame) -> pd.DataFrame:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _FIELD_DESCRIPTIONS = {
-    "Variant":             "free-text variant identifier/name, e.g. \"chr16:8811144 C>T\"",
+    "Variant":             "free-text variant identifier/name, e.g. \"chr1:1000000 C>T\"",
     "Chromosome":          "chromosome number/name, e.g. \"16\", \"chrX\"",
     "Position":            "genomic position (integer coordinate)",
-    "RS_ID":               "dbSNP rsID, e.g. \"rs80338708\"",
+    "RS_ID":               "dbSNP rsID, e.g. \"rs000000\"",
     "Ref_seq":             "reference allele",
     "Var_seq":             "alternate/variant allele",
     "Type":                "variant type/consequence, e.g. missense, nonsense, frameshift, synonymous, splicing",
-    "Transcript":          "RefSeq transcript/accession ID, e.g. \"NM_000303.3\", ONLY when given as its own column separate from the HGVS notation",
-    "HGVS":                "cDNA and/or protein change notation, e.g. \"c.710C>T p.(Thr237Met)\" (may include a transcript prefix). "
+    "Transcript":          "RefSeq transcript/accession ID, e.g. \"NM_000000.1\", ONLY when given as its own column separate from the HGVS notation",
+    "HGVS":                "cDNA and/or protein change notation, e.g. \"c.100A>C p.(Lys34Thr)\" (may include a transcript prefix). "
                            "Match this by the VALUE'S SHAPE, not the column name — a column with a generic/unrelated-"
                            "sounding name (e.g. \"variant_info\", \"annotation\", \"details\") still counts as HGVS if its "
                            "sample value contains a \"c.\" and/or \"p.\" change token, even bundled inside a longer "
                            "compound annotation across multiple transcripts, e.g. "
-                           "\"GENE:MANE_Select-NM_000540.3:exon13:c.1250T>C:p.Leu417Pro,GENE:NM_001042723.2:exon13:"
-                           "c.1250T>C:p.Leu417Pro\" is HGVS (map the whole cell — downstream parsers pull the c./p. "
+                           "\"GENE:MANE_Select-NM_000000.1:exon13:c.100A>C:p.Lys34Thr,GENE:NM_000001.1:exon13:"
+                           "c.100A>C:p.Lys34Thr\" is HGVS (map the whole cell — downstream parsers pull the c./p. "
                            "tokens back out of it). A real past failure: a column literally named \"variant_info\" "
                            "with exactly this shape was left unmapped in every run because its column name gave no "
                            "hint and the description above only showed a already-clean example — AutoPVS1 and other "
@@ -701,6 +708,13 @@ def _build_normalized_df(df: pd.DataFrame, df_original: pd.DataFrame) -> pd.Data
             out["HGVS"] = df_original[aa_col].apply(
                 lambda v: _parse_aachange(_clean(v))
             ).values
+
+    # Collapse a repeated gene symbol ("GENE;GENE", one entry per transcript
+    # in multi-transcript annotation exports) to the single symbol. Left as-is,
+    # every gene-level lookup queried "GENE;GENE[gene]", matched nothing, and
+    # silently reported the gene as empty (0 ClinVar P/LP variants, PM1 window
+    # empty). Only identical repeats are collapsed; distinct symbols are kept.
+    out["Gene"] = out["Gene"].apply(_collapse_repeated_gene)
 
     # Normalise Type vocabulary
     out["Type"] = out["Type"].apply(

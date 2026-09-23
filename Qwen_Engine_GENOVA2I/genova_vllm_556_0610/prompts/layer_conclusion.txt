@@ -70,12 +70,11 @@ incorrectly, not as grounds for inclusion.
 
 VARIANT IDENTITY CHECK (mandatory, before writing any variant): [GENE] and
 [HGVS] must be copied CHARACTER-FOR-CHARACTER from that variant's own block
-header line (e.g. its "# Variant N — GENE (HGVS)" line). Never retype,
-reconstruct, abbreviate, or paraphrase the HGVS from memory. EXCEPTION — a
-RECESSIVE block of the "(confirmed homozygous, biallelic)" kind has no HGVS
-in its header by design (gene name only); take the HGVS from its own
-"**Comment:**" prose instead, copied character-for-character. This is
-expected for that block kind, not a data error.
+header line (e.g. its "# Variant N — GENE (HGVS)" line, or a RECESSIVE
+block's "# Recessive Analysis (...) — GENE (HGVS)" line). Never retype,
+reconstruct, abbreviate, or paraphrase the HGVS from memory. A protein change
+quoted inside a PS1/PM5 criterion line is a different ClinVar comparator
+variant at the same residue — never the patient's own variant.
 
 SEGREGATION/MOI IDENTITY CHECK (mandatory, before writing any variant — a real
 observed failure this guards against): this layer's blocks above are

@@ -1,0 +1,11 @@
+name: clinvar_hotspot
+description: "Deterministic ClinVar P/LP vs B/LB missense count in a +/-8 residue window — grounds PM1 hotspot (VarSome rule)."
+enabled: true
+
+order: 1
+parallel: true
+
+timeout: 60
+retry:
+  attempts: 2
+  backoff: 2.0

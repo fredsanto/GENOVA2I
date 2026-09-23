@@ -89,7 +89,7 @@ MODE_LABELS = {
 def gene_chromosome(variants: list[dict], idxs: list[int]) -> str:
     """Best-effort chromosome for a gene, from the CSV Chromosome field if
     present, else parsed out of the free-text Variant field (e.g.
-    "chr12:416960 T?G" -> "12"). Returns "" if it can't be determined —
+    "chr1:1000000 T?G" -> "1"). Returns "" if it can't be determined —
     callers must treat that as unknown, not as "not X"."""
     for i in idxs:
         chrom_field = str(variants[i].get("Chromosome", "") or "").strip()
@@ -225,7 +225,7 @@ def zygosity_is_confirmed_hom(zyg) -> bool:
     the CSV (het status only visible via allelic balance), and previously
     this gate required proof of het rather than absence of hom, which
     silently dropped genuine compound-het pairs whenever Zygosity was NA
-    (e.g. two SZT2 variants both Zygosity=NA, real het via AB 0.54/0.43).
+    (e.g. two variants in one gene, both Zygosity=NA, real het via AB ~0.5).
     Zygosity is not something this code should determine — the LLM sees the
     ALLELIC BALANCE block directly in the prompt and is instructed to derive
     zygosity from it when the CSV field is unhelpful. Any case that isn't a

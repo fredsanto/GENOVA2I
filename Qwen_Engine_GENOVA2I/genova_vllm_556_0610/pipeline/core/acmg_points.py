@@ -71,14 +71,37 @@ _CRITERION_CODE_RE = r"(?:PVS1|PS[1-4]|PM[1-6]|PP[1-5]|BA1|BS[1-4]|BP[1-7])"
 #   "*   **PS2** (Strong, +4 pts): ..."
 #   "[PM6] (Moderate, +2 pts): ..."
 #   "PM3 (Supporting, +0.5 pts): ..."
+#   "**ACMG criteria:** PS1 (Strong, +4 pts): ...; PM2 (Moderate, +2 pts): ...; PP3 (...): ..."
 # — an optional leading bullet marker, optional bold/bracket wrapping
 # around the code, then a strength+points tag in either [] or () directly
-# after it. Deliberately position-independent: matched anywhere a line
-# starts with a code+tag pair, not anchored to a specific header or a
-# fixed number of lines above a total line.
+# after it. Deliberately position-independent: matched anywhere in the
+# text a code+tag pair occurs, not anchored to line starts.
+#
+# Previously anchored to (?:^|\n) before the optional bullet marker — this
+# silently broke on final_conclusion.py's own semicolon-joined single-line
+# rendering of multiple criteria (e.g. "PS1 (...); PM2 (...); PP3 (...)"
+# all on one line after "**ACMG criteria:** "), where every criterion after
+# the first isn't preceded by a newline. Real observed failure: a
+# PS1+PM2+PP3+PM3 = 7.5 list rendered this way had gather_criteria() find
+# only PS1 (the sole line-start match) or nothing at all when even PS1 sat
+# mid-line after the header text, so recompute_and_fix_totals() either
+# left the model's own wrong stated total untouched or "corrected" it down
+# to a partial sum — either way shipping "4 pts total (VUS)" for a report
+# whose own listed criteria summed to 7.5 (Likely Pathogenic). The trailing
+# requirement of an immediately-following "[Strength, +N]"/"(Strength, +N
+# pts)" tag already excludes bare narrative mentions of a code (e.g.
+# "supported by prior evidence (PS1)" or "(PS1)" with no strength/points
+# inside the same parens) without needing a line-start anchor as a second
+# line of defense — verified: neither false-positive shape matches this
+# pattern regardless of position in the text.
+#
+# The strength word is optional: moi_recessive_homozygous.txt renders its
+# delta bullet as "PM3 [+0.5]" (no strength). Requiring one dropped that PM3
+# from the Total line's re-sum, so every homozygous Total was silently
+# "corrected" back down to the Base value (Base 5, delta +0.5, Total 5).
 _CRITERION_MENTION_RE = re.compile(
-    r"(?:^|\n)[ \t]*[-*•]?[ \t]*\**\[?\b(" + _CRITERION_CODE_RE + r")\b\]?\**"
-    r"[ \t]*[\(\[][A-Za-z][A-Za-z \t]*,\s*([+-]?\d+(?:\.\d+)?)\s*(?:pts?)?\s*[\)\]]"
+    r"[ \t]*[-*•]?[ \t]*\**\[?\b(" + _CRITERION_CODE_RE + r")\b\]?\**"
+    r"[ \t]*[\(\[](?:[A-Za-z][A-Za-z \t]*,\s*)?([+-]?\d+(?:\.\d+)?)\s*(?:pts?)?\s*[\)\]]"
 )
 
 
@@ -332,7 +355,7 @@ def extract_base_acmg(base_conclusion: str) -> tuple[str, float] | None:
     asking the SLM to re-transcribe or re-derive it from context on every
     layer call.
 
-    A real observed failure this replaces: the same RYR1 variant's "Base
+    A real observed failure this replaces: the same variant's "Base
     ACMG points" came out as three different numbers (8, 4, 2) across its
     three MOI-layer blocks in one run, none of which even matched their own
     listed criteria in that same block — despite every layer prompt

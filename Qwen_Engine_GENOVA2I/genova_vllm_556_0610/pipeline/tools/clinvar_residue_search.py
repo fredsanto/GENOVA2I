@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _MAX_HITS_PER_RESIDUE = 15
 
 # Parses ClinVar's own title string, e.g.
-# "NM_201253.3(CRB1):c.3961T>A (p.Cys1321Ser)" -> nucleotide + protein change.
+# "NM_000000.1(GENE_X):c.100A>C (p.Lys34Thr)" -> nucleotide + protein change.
 _TITLE_RE = re.compile(r":(c\.[^\s(]+)\s*\(p\.([A-Za-z*]{1,3}\d+[A-Za-z*]{1,3})\)")
 _HIT_POSITION_RE = re.compile(r"\d+")
 
@@ -108,10 +108,10 @@ class ClinVarResidueSearchTool(NetworkTool):
 
         blocks = []
         for seed in seeds:
-            aa3_position = seed["query"].removeprefix("p.")  # e.g. "Cys1321"
-            own_change   = seed["own_change"]                 # e.g. "p.Cys1321Ser"
-            own_aa3      = seed["own_aa3"]                     # e.g. "Ser"
-            own_position = seed["position"]                    # e.g. "1321"
+            aa3_position = seed["query"].removeprefix("p.")  # e.g. "Lys34"
+            own_change   = seed["own_change"]                 # e.g. "p.Lys34Thr"
+            own_aa3      = seed["own_aa3"]                     # e.g. "Thr"
+            own_position = seed["position"]                    # e.g. "34"
 
             ids = self._esearch_ids(gene, aa3_position)
             summaries = self._esummary(ids)

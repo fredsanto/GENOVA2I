@@ -548,13 +548,13 @@ class WebSearchAgentTool(ReActTool):
                 prefetched_parts.append(f"{label} EVIDENCE:\n{output}")
 
         # ── Hardcoded variant-specific search (residue, not nucleotide) ──────
-        # A nucleotide-level query (e.g. "c.3962G>C") can only ever find THIS
+        # A nucleotide-level query (e.g. "c.100A>C") can only ever find THIS
         # exact allele. Both PS1 and PM5 need the opposite: OTHER established
         # pathogenic variants at the SAME residue — PS1 via a DIFFERENT
         # nucleotide producing the SAME amino acid change, PM5 via a DIFFERENT
         # missense change altogether — neither of which a nucleotide-exact or
         # full-change-exact query can surface by construction. Search by
-        # residue only (3-letter form, e.g. "p.Cys1321", matching ClinVar's
+        # residue only (3-letter form, e.g. "p.Lys34", matching ClinVar's
         # naming convention, destination amino acid dropped) so one query
         # returns every substitution reported at that position. Downstream in
         # the conclusion stage: same amino acid change + different nucleotide

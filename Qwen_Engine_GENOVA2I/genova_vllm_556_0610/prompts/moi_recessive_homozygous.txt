@@ -62,7 +62,7 @@ TASK:
 
 Use exactly this format:
 
-# Recessive Analysis — {gene} (confirmed homozygous, biallelic)
+# Recessive Analysis (confirmed homozygous, biallelic) — [GENE] ([HGVS])
 **Zygosity:** Homozygous — both alleles carry this variant; biallelic requirement satisfied without need for a second variant.
 **Parental carrier / consanguinity status:** [what evidence IS present, or "no parental/consanguinity data available"]
 **Recessive criteria applied:** [PM3 [+0.5] — reduced weight, consanguinity not excluded] OR [PM3 [+1] — consanguinity explicitly excluded, cite source] OR [None — parent is themselves homozygous, segregation discordant with simple biallelic transmission]

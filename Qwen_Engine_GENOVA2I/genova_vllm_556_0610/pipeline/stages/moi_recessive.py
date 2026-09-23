@@ -38,6 +38,7 @@ from pipeline.core.acmg_points import (
     recompute_and_fix_totals,
 )
 from pipeline.core.acmg_bs2_recessive import validate_bs2_homozygous_unaffected_parent
+from pipeline.stages.conclusion import _own_identity
 
 if TYPE_CHECKING:
     from pipeline.llm.base import LLMClient
@@ -248,7 +249,7 @@ def run_pair(
 
     Args:
         gene:                          Gene symbol.
-        variant_a_label, variant_b_label: Display labels (e.g. "Variant 3 — LRTOMT (p.Leu117Val)").
+        variant_a_label, variant_b_label: Display labels (e.g. "Variant 3 — GENE_X (p.Lys34Thr)").
         variant_a_context, variant_b_context: Per-variant context strings from retrieval.
         variant_a_base_conclusion, variant_b_base_conclusion: Layer 2's full structured
                           output for each variant — ground truth this stage adds to.
@@ -310,6 +311,32 @@ def run_pair(
     ])
 
 
+_SOLO_HEADER_RE = re.compile(r"(?m)^#\s*Recessive Analysis\b.*$")
+
+
+def _force_solo_header_identity(result: str, gene: str, variant_context: str) -> str:
+    """
+    Rewrites the homozygous-solo "# Recessive Analysis — ..." header with this
+    variant's own Gene/HGVS read from the input CSV (variant_context's Gene=/
+    HGVS= fields), ending in the same "[GENE] ([HGVS])" shape as every other
+    MOI layer's header; the "(confirmed homozygous, biallelic)" kind label
+    downstream prompts key on is kept before the dash. The template header used to name only the gene, so the block
+    carried no identity of its own — the only protein change inside it was
+    the PM5/PS1 comparator quoted in the copied criteria, and final synthesis
+    reported THAT comparator as the patient's variant. Same override as
+    conclusion._force_variant_header_identity(), which only covers the Stage-4
+    header and never reaches this layer block. Kept in the "GENE (detail)"
+    shape final_conclusion._HEADER_LINE_RE parses.
+    """
+    true_gene, true_hgvs = _own_identity(variant_context)
+    header = (f"# Recessive Analysis (confirmed homozygous, biallelic) — "
+              f"{true_gene or gene} ({true_hgvs or 'HGVS unavailable'})")
+    if not _SOLO_HEADER_RE.search(result):
+        logger.warning("[MOIRecessive] Solo header not found for %s — prepending forced header.", gene)
+        return header + "\n" + result
+    return _SOLO_HEADER_RE.sub(lambda _m: header, result, count=1)
+
+
 def run_solo(
     gene: str,
     variant_label: str,
@@ -325,7 +352,7 @@ def run_solo(
 
     Args:
         gene:                     Gene symbol.
-        variant_label:            Display label (e.g. "Variant 3 — PMM2 (p.Thr237Met)").
+        variant_label:            Display label (e.g. "Variant 3 — GENE_X (p.Lys34Thr)").
         variant_context:          Per-variant context string from retrieval.
         variant_base_conclusion:  Layer 2's full structured output — ground truth this
                                    stage documents against (does not re-score it).
@@ -367,6 +394,7 @@ def run_solo(
     # prompt already neutralizes PM3 for a homozygous-parent discordance but
     # never applies the BS2 penalty that discordance itself is evidence for.
     # See validate_bs2_homozygous_unaffected_parent's docstring.
+    result = _force_solo_header_identity(result, gene, variant_context)
     result = validate_bs2_homozygous_unaffected_parent(result, variant_base_conclusion, segregation)
     # Re-sum each variant's copied-verbatim base criteria against its own
     # "Base ACMG points" line before relabeling — catches a base conclusion

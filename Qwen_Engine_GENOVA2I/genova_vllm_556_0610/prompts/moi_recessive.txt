@@ -135,7 +135,7 @@ TASK:
 
 Use exactly this format:
 
-# Recessive Analysis — {gene} (compound heterozygous / biallelic)
+# Recessive Analysis (compound heterozygous / biallelic) — [GENE] ([HGVS of Variant A] / [HGVS of Variant B])
 **Phase:** [copy the backend-determined phase verbatim from above]
 **Parental carrier status:** [what evidence IS present about parents being unaffected carriers, or "no parental phenotype data available"]
 **Recommendation:** [ONLY when step 5 applies — singleton, no parental AB data at all for either variant: "Parental/segregation testing recommended to confirm phase (cis vs. trans) before this compound heterozygous pair can be considered diagnostic." Omit this line entirely when step 5 does not apply.]

@@ -64,6 +64,8 @@ import xml.etree.ElementTree as ET
 from pipeline.tools.base import SLMTool
 from pipeline.core.context import ToolContext
 from pipeline.core.errors import PipelineError, ToolFetchError, ToolParseError
+from pipeline.core.protein_change import PROTEIN_CHANGE_RE, _to_aa3
+from pipeline.tools.clinvar_gene_stats import _FUNCTIONAL_MARKERS, _COMMENT_EXCLUDE_MARKERS
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +76,18 @@ LITVAR2_URL        = f"{LITVAR2_BASE}/variant/get/litvar@{{rsid}}%23%23/publicat
 LITVAR2_AUTOCOMPLETE_URL = f"{LITVAR2_BASE}/variant/autocomplete/"
 
 # Extracts the protein-change token from a combined HGVS field, e.g.
-# "NM_000330.4(RS1):c.214G>A (p.Glu72Lys)" → "p.Glu72Lys", or a bare
-# "p.E72K" short form. LitVar2's autocomplete accepts either 3-letter or
+# "NM_000000.1(GENE_X):c.100A>C (p.Lys34Thr)" → "p.Lys34Thr", or a bare
+# "p.K34T" short form. LitVar2's autocomplete accepts either 3-letter or
 # 1-letter amino acid codes.
 _PROTEIN_CHANGE_RE = re.compile(r"p\.\(?([A-Za-z*]{1,3}\d+[A-Za-z*]{1,3}(?:fs\*?\d*)?)\)?")
+
+# Extracts the cDNA-change token out of a combined/compound HGVS string, e.g.
+# "GENE_X:NM_000000:exon4:c.100A>C:p.K34T" -> "c.100A>C". Same pattern as
+# clinvar_gene_stats.py's own _CDNA_CHANGE_RE (independent copy — see that
+# file's docstring on why this project duplicates ClinVar-lookup helpers
+# across tools rather than sharing state between order-1-parallel tools).
+_CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;()]+")
+
 NCBI_BASE    = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 # Without API key: 3 req/s → 0.34 s delay.  With API key: 10 req/s → 0.11 s delay.
 # Set NCBI_API_KEY env var (free key from https://www.ncbi.nlm.nih.gov/account/).
@@ -349,7 +359,7 @@ class LitVar2SummaryTool(SLMTool):
     @staticmethod
     def extract_protein_change(hgvs: str) -> str | None:
         """Pulls the 'p.XxxNNNXxx' token out of a combined HGVS string, e.g.
-        'NM_000330.4(RS1):c.214G>A (p.Glu72Lys)' → 'p.Glu72Lys'."""
+        'NM_000000.1(GENE_X):c.100A>C (p.Lys34Thr)' → 'p.Lys34Thr'."""
         if not hgvs or hgvs == "NA":
             return None
         m = _PROTEIN_CHANGE_RE.search(hgvs)
@@ -358,7 +368,7 @@ class LitVar2SummaryTool(SLMTool):
     def _resolve_rsid_by_gene_protein(self, gene: str, protein_change: str) -> str | None:
         """
         LitVar2's own index is rsID-keyed, but its autocomplete endpoint resolves
-        a free-text 'GENE proteinchange' query (e.g. "RS1 E72K") to the matching
+        a free-text 'GENE proteinchange' query (e.g. "GENE_X K34T") to the matching
         rsID — this lets Track 3 find variant-level literature even when the
         input CSV's RS_ID column is NA (common in clinical exports) but the gene
         and protein change are known, instead of skipping variant-level search
@@ -382,6 +392,63 @@ class LitVar2SummaryTool(SLMTool):
         if rsid and re.match(r"^rs\d+$", rsid, re.IGNORECASE):
             return rsid
         return None
+
+    def _resolve_dbsnp_via_clinvar(self, gene: str, hgvs: str) -> str | None:
+        """
+        Cross-check for _resolve_rsid_by_gene_protein's autocomplete guess:
+        independently resolves this variant's dbSNP rsID via ClinVar's own
+        cross-reference data (gene+cDNA-token esearch -> ClinVar variation ID
+        -> VCV XML's XRefList), rather than trusting LitVar2's free-text
+        "GENE proteinchange" autocomplete match on faith.
+
+        Real case that motivated this: a missense variant (GENE_X c.NNNN>N,
+        p.ExampleChange) with RS_ID NA in the input CSV — the autocomplete
+        path resolved it to an rsID that turned out to belong to a different
+        variant. ClinVar's own record for this exact variant (found
+        independently via gene+cDNA esearch, matching clinvar_gene_stats.py's
+        own resolution for the SAME variant) cross-references a DIFFERENT
+        rsID. LitVar2's variant-specific search then ran against the wrong
+        ID, correctly found nothing, and silently starved PS3 of the
+        variant-level functional-evidence search track — with no error
+        anywhere, since a "no hits for this rsID" result looks identical to
+        a genuinely rsID-less/unstudied variant.
+
+        Returns None on no ClinVar match, a missing dbSNP xref, or any fetch
+        failure — this is a best-effort cross-check, never a hard requirement
+        (never raises; callers fall back to the autocomplete result as-is).
+        """
+        cdna_match = _CDNA_CHANGE_RE.search(hgvs) if hgvs and hgvs != "NA" else None
+        variant_term = cdna_match.group(0) if cdna_match else hgvs
+        if not variant_term or variant_term == "NA":
+            return None
+        term = f"{gene}[gene] AND {variant_term}[variant name]"
+        try:
+            search_data = _ncbi_get(
+                "esearch.fcgi",
+                {"db": "clinvar", "term": term, "retmode": "json", "retmax": 1},
+                self.timeout,
+            ).json()
+            ids = search_data.get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                return None
+            xml_text = _ncbi_get(
+                "efetch.fcgi",
+                {"db": "clinvar", "id": ids[0], "rettype": "vcv",
+                 "is_variationid": "true", "retmode": "xml"},
+                self.timeout,
+            ).text
+            root = ET.fromstring(xml_text)
+        except Exception as e:
+            logger.debug(
+                "ClinVar dbSNP cross-check failed for gene=%s hgvs=%s: %s", gene, hgvs, e
+            )
+            return None
+
+        xref = root.find(".//XRef[@DB='dbSNP']")
+        if xref is None:
+            return None
+        rs_num = xref.get("ID")
+        return f"rs{rs_num}" if rs_num and rs_num.isdigit() else None
 
     # ── step 1: LitVar2 → PMIDs (rsID path) ──────────────────────────────────
 
@@ -779,8 +846,8 @@ class LitVar2SummaryTool(SLMTool):
         # OR-heavy query almost any paper mentioning the gene near a disease/
         # inheritance word matches, so a pub_date-primary sort returns the N most
         # recent papers on the gene regardless of topic — for a gene whose
-        # founding gene-disease paper is old (e.g. SYN1-epilepsy, established in
-        # 2004/2011) that paper is pushed out of the max_pmids window entirely
+        # founding gene-disease paper is old (e.g. a gene-disease link
+        # established two decades ago) that paper is pushed out of the max_pmids window entirely
         # and every candidate the SLM sees is an unrelated recent publication.
         # _esearch_gene already adds a supplemental pub_date-sorted call when
         # total_count exceeds max_pmids, so recent literature is still covered.
@@ -966,6 +1033,42 @@ class LitVar2SummaryTool(SLMTool):
 
     # ── supplemental: rsID-level LitVar2 search ──────────────────────────────
 
+    # PS3 from LitVar2: only the variant-level (rsID) track, only a summary
+    # sentence that (a) reports functional/experimental work, (b) is not
+    # negated/in-silico, (c) names THIS variant (rsID, its own c./p. notation,
+    # or "this/the specific/exact variant"), and (d) cites a PMID among the
+    # papers this track itself retrieved. Gene-level tracks never count —
+    # a paper about the gene is not functional evidence for the variant.
+    _NEGATION_MARKERS = (
+        " no ", "none ", "neither", " nor ", "without", "lack", "absent",
+        " not ", "n't ",
+    )
+    _THIS_VARIANT_PHRASES = (
+        "this variant", "this specific variant", "this exact variant",
+        "the specific variant", "the exact variant", "the variant itself",
+    )
+
+    @classmethod
+    def _variant_functional_pmids(cls, summary: str, paper_pmids: set[str],
+                                  rsid: str, hgvs: str) -> list[str]:
+        own = {rsid.lower()} | {t.lower() for t in re.findall(r"c\.[^\s:;|()]+", hgvs or "")}
+        for ref, pos, alt in PROTEIN_CHANGE_RE.findall(hgvs or ""):
+            own |= {f"p.{ref}{pos}{alt}".lower(), f"p.{_to_aa3(ref)}{pos}{_to_aa3(alt)}".lower()}
+        out: list[str] = []
+        for sent in re.split(r"(?<=[.!?])\s+", summary):
+            low = f" {sent.lower()} "
+            if not any(m in low for m in _FUNCTIONAL_MARKERS):
+                continue
+            if any(x in low for x in _COMMENT_EXCLUDE_MARKERS + cls._NEGATION_MARKERS):
+                continue
+            if not (any(p in low for p in cls._THIS_VARIANT_PHRASES) or any(t in low for t in own)):
+                continue
+            for pmid in re.findall(r"PMID:?\s*(\d{6,9})", sent):
+                if pmid in paper_pmids and pmid not in out:
+                    out.append(pmid)
+        return out
+
+
     def _rsid_search(self, rsid: str, context: ToolContext) -> str | None:
         """
         Supplemental variant-specific search via LitVar2 rsID endpoint.
@@ -999,10 +1102,18 @@ class LitVar2SummaryTool(SLMTool):
             f"  - [PMID:{pmid}, {p.get('year', 'n.d.')}] {p['title']}  {p['url']}"
             for pmid, p in papers.items()
         )
+        func_pmids = self._variant_functional_pmids(
+            summary, {str(k) for k in papers}, rsid, context.field("HGVS")
+        )
+        func_tag = (
+            "\n[variant-level functional evidence reported by LitVar2, citing "
+            + ", ".join(f"PMID:{p}" for p in func_pmids[:5]) + "]"
+            if func_pmids else ""
+        )
         return (
             f"LitVar2 variant-specific evidence for {rsid}\n"
             f"[Source: LitVar2 variant publications endpoint — "
-            f"{len(titles)} records screened, {len(papers)} selected]\n\n"
+            f"{len(titles)} records screened, {len(papers)} selected]{func_tag}\n\n"
             f"{summary}\n\n"
             f"Sources:\n{source_lines}"
         )
@@ -1138,6 +1249,28 @@ class LitVar2SummaryTool(SLMTool):
             if protein_change:
                 resolved = self._resolve_rsid_by_gene_protein(gene, protein_change)
                 if resolved:
+                    # LitVar2's free-text "GENE proteinchange" autocomplete match
+                    # can silently resolve to a different variant's rsID (verified
+                    # live) — its own variant-specific search then runs against the
+                    # wrong ID, finds nothing, and looks identical to a genuinely
+                    # unstudied variant. Cross-check against ClinVar's own dbSNP
+                    # cross-reference for this exact gene+HGVS before trusting the
+                    # autocomplete guess.
+                    confirmed = self._resolve_dbsnp_via_clinvar(gene, hgvs)
+                    if confirmed and confirmed.lower() != resolved.lower():
+                        logger.warning(
+                            "LitVar2SummaryTool: autocomplete rsid=%s for gene=%s "
+                            "protein_change=%s disagrees with ClinVar's own dbSNP "
+                            "xref rsid=%s — using ClinVar's", resolved, gene,
+                            protein_change, confirmed,
+                        )
+                        resolved = confirmed
+                    elif not confirmed:
+                        logger.debug(
+                            "LitVar2SummaryTool: could not cross-check autocomplete "
+                            "rsid=%s against ClinVar (no dbSNP xref found) — using "
+                            "autocomplete result as-is", resolved,
+                        )
                     logger.info(
                         "LitVar2SummaryTool: resolved rsid=%s from gene=%s protein_change=%s "
                         "(RS_ID column was NA)", resolved, gene, protein_change,
@@ -1184,7 +1317,10 @@ if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.DEBUG)
 
-    rsid = "rs121913527"  # swap for any rsid you want to test
+    import sys
+    if len(sys.argv) != 2:
+        sys.exit("usage: python -m pipeline.tools.litvar2 <rsid>")
+    rsid = sys.argv[1]
 
     # Step 1: raw API response
     import requests

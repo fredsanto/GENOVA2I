@@ -2,10 +2,10 @@
 pipeline/core/acmg_pp2_bp1.py — mechanically enforces PP2/BP1's exact-verdict
 requirement against the CLINVAR_GENE_STATS gene-level verdict.
 
-A real observed failure: a homozygous CRB1 missense variant got PP2 applied
-with the justification "high count of P/LP missense variants (181)" — but
+A real observed failure: a homozygous missense variant got PP2 applied
+with the justification "high count of P/LP missense variants (N)" — but
 the gene's actual CLINVAR_GENE_STATS verdict for that run was "balanced"
-(181 missense vs. 331 nonsense/frameshift), not "missense-predominant". The
+(N missense vs. M nonsense/frameshift, M well above N), not "missense-predominant". The
 model substituted its own plausibility read of the raw counts for the
 verdict string prompts/conclusion.txt explicitly requires an exact match
 against. This module re-derives the verdict from the same raw counts and the

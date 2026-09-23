@@ -312,7 +312,11 @@ def _qualifying_causative_findings(
         if joint_m:
             if joint_m.group(1) != "CAUSATIVE":
                 return  # COMPOUND VUS pair — neither partner is causative here
-            headers = list(_HEADER_LINE_RE.finditer(block))
+            # Only the per-variant "## Variant A/B — ..." headers pair with
+            # the two totals; the block's own top "# Recessive Analysis —"
+            # header also matches _HEADER_LINE_RE and, left in, shifted every
+            # pairing by one (A's total under the top header, B's under A's).
+            headers = [h for h in _HEADER_LINE_RE.finditer(block) if h.group(0).startswith("##")]
             totals = list(_ANY_TOTAL_RE.finditer(block))
             for header_m, total_m in zip(headers, totals):
                 try:
@@ -320,7 +324,8 @@ def _qualifying_causative_findings(
                 except ValueError:
                     continue
                 findings.append({
-                    "gene":   header_m.group("gene").strip(),
+                    # Pair labels read "Variant N — GENE (HGVS)" — drop the prefix.
+                    "gene":   header_m.group("gene").split("—")[-1].strip(),
                     "detail": header_m.group("detail").strip(),
                     "points": points,
                     "label":  total_m.group(2).strip(),

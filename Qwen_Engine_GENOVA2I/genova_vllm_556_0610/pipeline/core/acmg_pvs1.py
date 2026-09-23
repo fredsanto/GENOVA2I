@@ -5,14 +5,14 @@ against two genuine observed failures.
 First failure: the model applying PVS1 anyway when AutoPVS1 already examined
 this exact variant and returned "PVS1 applicable: False".
 
-Real case: ARID2 c.706-7A>G (intron, position -7 — not a canonical ±1/2
+Real case: a GENE_X c.100-7A>G (intron, position -7 — not a canonical ±1/2
 splice site). AutoPVS1's own block for this variant read "PVS1 applicable:
 False" with every other field (path/steps/strength) blank — AutoPVS1
 determined no qualifying LoF pathway exists. The model applied PVS1
 [VeryStrong, +8] anyway, justified only as "supported by gene constraint and
 variant location at a canonical splice site" (false — position -7 is not
 canonical), turning a would-be VUS into a false-positive Pathogenic/Likely
-Pathogenic call. A near-identical case (POGZ c.1186-10T>G, intron position
+Pathogenic call. A near-identical case (a GENE_Y c.200-10T>G, intron position
 -10) produced the same failure. Telling the model in prompts/conclusion.txt
 that AutoPVS1's verdict is authoritative did not reliably stop this — this
 module enforces it deterministically instead, the same way acmg_pp2_bp1.py
@@ -28,11 +28,11 @@ all" and left the model's own Type/HGVS judgment untouched — but the model
 then credited full VeryStrong PVS1 (+8) from gene-level constraint alone
 (pLI/LOEUF), never having confirmed the variant is actually a null allele.
 
-Real case: MN1 chr22:28195637 — Ref_seq/Var_seq show a 21 bp deletion,
+Real case: a GENE_Z deletion — Ref_seq/Var_seq show a 21 bp deletion,
 exactly divisible by 3 (an in-frame 7-codon deletion, not a frameshift), with
 HGVS=NA/Transcript=NA. AutoPVS1 was gated on (Type=indel) but returned no
 resolvable output. The model wrote "PVS1 [VeryStrong, +8]: Loss-of-function
-variant in a LoF-intolerant gene (*MN1* pLI=1.000) where haploinsufficiency
+variant in a LoF-intolerant gene (*GENE_Z* pLI near 1) where haploinsufficiency
 is the likely disease mechanism" — a gene-constraint argument standing in for
 a variant-level null-allele finding that was never actually made; an in-frame
 deletion does not itself satisfy PVS1's null-variant requirement.
@@ -43,7 +43,7 @@ Strong=4, Moderate=2, Supporting=1) when AutoPVS1 gave no verdict at all, and
 only when the variant's own Type/HGVS is unambiguous null — frameshift,
 nonsense/stop-gain, or canonical splice ±1/2. Anything else in that
 situation — a bare "indel"/"deletion" Type with no frame evidence, missense,
-deep intronic (ARID2/POGZ-style), UTR, etc. — gets PVS1 stripped entirely,
+deep intronic (the -7/-10 cases above), UTR, etc. — gets PVS1 stripped entirely,
 same as an explicit AutoPVS1 "False".
 """
 
@@ -68,7 +68,7 @@ _TYPE_RE = re.compile(r"Type=([^,\n]*)")
 _HGVS_RE = re.compile(r"HGVS=(.*?),\s*Zygosity=")
 
 # Canonical splice site: exactly ±1 or ±2 from the exon boundary. Deep
-# intronic (±3 and beyond, e.g. the ARID2 c.706-7A>G case above) must NOT
+# intronic (±3 and beyond, e.g. the c.100-7A>G case above) must NOT
 # match this.
 _CANONICAL_SPLICE_RE = re.compile(r"c\.\d+[+-][12][A-Za-z]")
 
@@ -82,7 +82,7 @@ def _is_unambiguous_null_variant(variant_context: str) -> bool:
     null allele: frameshift, nonsense/stop-gain, or canonical ±1/2 splice.
     Deliberately narrower than a bare Type=="indel"/"deletion" match (that
     covers in-frame indels too, which do not on their own satisfy PVS1 — see
-    the MN1 case above) and narrower than autopvs1.py's own gate list, which
+    the GENE_Z case above) and narrower than autopvs1.py's own gate list, which
     exists only to decide whether an AutoPVS1 lookup is worth attempting,
     not to award points when that lookup comes back empty.
     """

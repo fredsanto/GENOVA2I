@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 CLINGEN_ALLELE_REGISTRY_URL = "https://reg.clinicalgenome.org/allele"
 
 # Extracts the cDNA-change token out of a combined/compound HGVS string, e.g.
-# "RS1:NM_000330:exon4:c.214G>A:p.E72K" -> "c.214G>A". Same shape of problem
+# "GENE_X:NM_000000:exon4:c.100A>C:p.K34T" -> "c.100A>C". Same shape of problem
 # as ncbi.py's ClinVar resolver — the Allele Registry wants a clean
 # "TRANSCRIPT:c.change" pair, not a colon-glued compound annotation. "("
-# excluded too — otherwise a "c.1292T>A(p.Val431Asp)"-style string swallows
+# excluded too — otherwise a "c.200T>A(p.Val67Asp)"-style string swallows
 # the trailing protein annotation into the token.
 _CDNA_CHANGE_RE = re.compile(r"c\.[^\s:;()]+")
 _CLEAN_TRANSCRIPT_HGVS_RE = re.compile(r"^[A-Za-z0-9_]+\.\d+:c\.")
@@ -58,7 +58,7 @@ def _build_query_candidates(variant: dict, genome_build: str) -> list[str]:
     Build an ordered list of HGVS strings to try against the Allele Registry:
       1. Transcript field + clean cDNA token extracted from HGVS -> "NM_x.x:c.xxx"
          (skipped if Transcript has no version suffix — ClinGen rejects a bare
-         "NM_000330" with "Unknown reference", and the CSV's own Transcript
+         "NM_000000" with "Unknown reference", and the CSV's own Transcript
          field is frequently NA/versionless on compound-HGVS input rows)
       2. HGVS field already looks like a clean, versioned transcript:c. string
       3. Genomic-coordinate SNV fallback, declared build first, then the OTHER

@@ -27,14 +27,14 @@ def extract_residue_queries(hgvs: str) -> list[dict]:
     """
     One entry per distinct residue position across all transcript segments of
     a (possibly multi-transcript, pipe-separated) HGVS string — e.g.
-    [{"position": "1321", "query": "p.Cys1321", "own_change": "p.Cys1321Ser",
-      "own_aa3": "Ser"}].
+    [{"position": "34", "query": "p.Lys34", "own_change": "p.Lys34Thr",
+      "own_aa3": "Thr"}].
 
     Different transcripts of the same physical variant can carry different
     residue numbers (alternate first exons/UTRs shift the coding start), so
     every distinct position is extracted, not just the first segment.
     3-letter form matches ClinVar's own variant-naming convention (e.g.
-    "Cys1321"), which a bare 1-letter query ("C1321") often misses.
+    "Lys34"), which a bare 1-letter query ("K34") often misses.
     """
     seeds: list[dict] = []
     seen_positions: set[str] = set()

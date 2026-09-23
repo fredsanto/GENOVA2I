@@ -5,9 +5,9 @@ COVERAGE gate against the backend-computed phenotype-cluster verdict.
 
 Real observed failure, TWICE, even after prompts/conclusion.txt was given an
 explicit worked negative example naming this exact condition: PP4 applied
-for an LDLR variant in "familial hypercholesterolemia" ("a condition with a
-known genetic etiology in LDLR") without ever addressing that FH is also
-independently caused by APOB and PCSK9 — a textbook heterogeneous condition.
+for a GENE_X variant in "condition Y" ("a condition with a known genetic
+etiology in GENE_X") without ever addressing that condition Y is also
+independently caused by two other genes — a textbook heterogeneous condition.
 Since prompt-only guidance repeatedly failed on this exact case, this module
 mechanically strips PP4 when its own justification names a condition on a
 small maintained list of well-known heterogeneous Mendelian conditions,

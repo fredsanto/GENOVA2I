@@ -8,13 +8,13 @@ curated, disease-defining phenotype summary GeneReviews maintains per gene.
 Why this exists: LitVar2's PubMed tracks (litvar2.py) rank a broad, uncurated
 paper pool by relevance or publication date (deliberately pub_date-sorted in
 _gene_search, to surface recently-characterized gene-disease links). For a
-heavily published gene that also causes a rare syndrome — e.g. SMAD4, which
-has thousands of papers on colorectal/pancreatic cancer — that pool can end up
+heavily published gene that also causes a rare syndrome — e.g. a common
+cancer gene with thousands of oncology papers — that pool can end up
 dominated by unrelated or narrow recent case reports (e.g. a single 2026
 hepatic-complication case report), silently excluding the one canonical
 phenotype description a clinician would actually consult. This surfaced in
-practice: SMAD4/Myhre syndrome was scored "no neurological association" from
-retrieved literature, when GeneReviews' own Myhre Syndrome chapter explicitly
+practice: such a gene's rare syndrome was scored "no neurological association"
+from retrieved literature, when GeneReviews' own chapter for that syndrome explicitly
 lists "developmental delay / intellectual disability" and "epilepsy" as part
 of the syndrome. GeneReviews is authored per-gene/per-condition specifically
 to be the single curated summary, so this tool bypasses the PubMed

@@ -55,7 +55,7 @@ from pipeline.llm.registry   import get_client
 from pipeline.tools          import (
     AutoPVS1Tool, LitVar2SummaryTool, SpliceAITool, WebSearchAgentTool,
     GnomadConstraintTool, GnomadFrequencyTool, ClinVarGeneStatsTool,
-    ClinVarResidueSearchTool, ClinGenAlleleTool, GeneReviewsTool,
+    ClinVarResidueSearchTool, ClinVarHotspotTool, ClinGenAlleleTool, GeneReviewsTool,
 )
 from pipeline.tools.clinvar_gene_stats import classify_consequence_counts
 from pipeline.tools.gnomad_constraint  import (
@@ -66,7 +66,10 @@ from pipeline.tools.autopvs1           import (
     parse_variant_coords, _CLEAR_LOF_TYPES,
 )
 from pipeline.core.errors              import ToolFetchError, ToolParseError
-from pipeline.core.clinvar_reference   import append_clinvar_reference
+from pipeline.core.clinvar_reference   import (
+    append_clinvar_reference, add_clinvar_status_to_findings, clinvar_status_from_context,
+)
+from pipeline.core.acmg_ps3            import surface_ps3_citations
 from pipeline.stages         import (
     retrieval, reasoning, conclusion, cross_analysis, final_conclusion, first_triage,
     moi_denovo, moi_dominant, moi_recessive, moi_xlinked, actionable,
@@ -84,7 +87,7 @@ def _parse_variant_str(variant_str: str) -> dict:
     Parse a canonical key=value variant string into a dict.
 
     The normalizer produces strings of the form:
-        "Variant=chr6:100896130 T>C, Chromosome=chr6, Position=100896130, ..."
+        "Variant=chr1:1000000 T>C, Chromosome=chr1, Position=1000000, ..."
 
     We extract each TARGET_COLUMN by matching:
         <ColumnName>=<value>
@@ -458,6 +461,7 @@ class Pipeline:
             GnomadFrequencyTool(),
             ClinVarGeneStatsTool(),
             ClinVarResidueSearchTool(),
+            ClinVarHotspotTool(),
             ClinGenAlleleTool(),
             GeneReviewsTool(),
         ]
@@ -592,7 +596,7 @@ class Pipeline:
         # was mismapped by the header interpreter (real observed case: a
         # dated column name like "ClinVar.20230813..Stars..Conflict_details."
         # went unmapped while an unrelated empty column was mapped to
-        # ClinVar_class instead, silently losing a Pathogenic BRCA1 call).
+        # ClinVar_class instead, silently losing a Pathogenic ACMG SF gene call).
         clingen_raw_by_variant: dict[int, str | None] = {
             entry["variant_index"]: entry.get("raw_output")
             for entry in self._executor.process_log
@@ -603,7 +607,7 @@ class Pipeline:
         # record) earlier in retrieval — deterministic ground truth,
         # independent of the CSV's own (SLM-mapped, sometimes wrong)
         # ClinVar_class column. See acmg_sf.build_actionable_set's docstring
-        # for the BRCA1 case this was added for.
+        # for the case this was added for.
         clinvar_tally_raw_by_variant: dict[int, str | None] = {
             entry["variant_index"]: entry.get("raw_output")
             for entry in self._executor.process_log
@@ -1215,7 +1219,7 @@ class Pipeline:
         #     phenotype at all. cluster_match_cache[i] is that same backend-parsed,
         #     authoritative Stage 1 verdict already used to gate PP4/PVS1 at the
         #     conclusion stage (see prompts/conclusion.txt's PHENOTYPE PERTINENCE
-        #     CHECK) — a real observed failure: NEB (nemaline myopathy) was
+        #     CHECK) — a real observed failure: a myopathy gene was
         #     correctly EXCLUDEd by second_triage with cluster verdict NONE ("no
         #     cluster of the patient's phenotype overlaps"), but the compound-het
         #     override forced it back to INCLUDE anyway because phase alone wasn't
@@ -1361,7 +1365,7 @@ class Pipeline:
 
         # ── Layer 3: de novo (AD / AD_AR / XLD genes, AND any X-linked mode —
         #     de novo occurrence is a valid PS2/PM6 signal for XLR/XL genes
-        #     too, e.g. a de novo MECP2 variant confirmed absent in both
+        #     too, e.g. a de novo X-linked variant confirmed absent in both
         #     parents; the moi_xlinked layer only ever adds PP1, never PS2,
         #     so without this a confirmed-de-novo X-linked variant would get
         #     zero credit for that despite trio data confirming it.
@@ -1664,6 +1668,14 @@ class Pipeline:
             actionable_variants=actionable_flagged,
             llm=self._llm,
         )
+        # CLINVAR status next to every finding in sections 2-4 (causative,
+        # actionable, notable VUS), from each variant's own ClinVar evidence.
+        final_summary = add_clinvar_status_to_findings(final_summary, [
+            (variants[i].get("Gene", "NA"),
+             variants[i].get("HGVS", variants[i].get("Variant", "")),
+             clinvar_status_from_context(context_slices[i]))
+            for i in conclusions
+        ])
 
         actionable_section = actionable.run(
             flagged=actionable_flagged,
@@ -1753,6 +1765,11 @@ class Pipeline:
             + moi_sections
             + f"\n{SEP_VARIANT}\nCLINICAL CONCLUSION\n{SEP_VARIANT}\n\n{final_summary}\n"
         )
+
+        # PS3 is literature-only; downstream SLM rewrites (MOI layer blocks,
+        # Clinical Conclusion) routinely drop the grounding PMID — re-attach
+        # it from the validated Stage-4 PS3 line so the reader always sees it.
+        final_report = surface_ps3_citations(final_report, list(conclusions.values()))
 
         if actionable_section:
             final_report += (

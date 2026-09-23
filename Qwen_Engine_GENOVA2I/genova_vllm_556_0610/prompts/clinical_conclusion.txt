@@ -247,6 +247,14 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
 
 # Clinical Conclusion
 
+CLINVAR COVERAGE (sections 2, 3 and 4): every finding you list there must end
+with "— CLINVAR: <value>", copying <value> exactly from that variant's own
+block's "**ClinVar reference:** CLINVAR: <value>" line (one of: P/LP (with
+reference), P/LP w/o reference, VUS, LB/B, undefined, conflicting P/LP/VUS,
+conflicting VUS/LB/B). Never infer it from the criteria list. "P/LP w/o
+reference" means ClinVar calls it P/LP but no submitter cites functional
+work — say so; it is not PS3.
+
 1) Summary of clinical phenotype: [1-2 sentences summarizing the patient's phenotype as given]
 
 2) Causative variant(s): list EVERY variant meeting the CAUSATIVE THRESHOLD
@@ -275,25 +283,11 @@ and explaining which layer(s)/variant(s) jointly explain the phenotype]
    to write and the source block's own HGVS string, however small, is this
    exact failure — stop and copy the source string exactly instead.
 
-   EXCEPTION — RECESSIVE block of the "(confirmed homozygous, biallelic)"
-   kind: unlike every other block type, this one's header line intentionally
-   has NO HGVS at all ("# Recessive Analysis — GENE (confirmed homozygous,
-   biallelic)" — gene name only). This is expected, by design, not a data
-   error or an omission to investigate. For this block kind only, take the
-   HGVS from its own "**Comment:**" prose instead (e.g. "...homozygous for
-   the *GENE* c.XXXX variant...") — copy it character-for-character from
-   there. Do NOT treat the header's missing HGVS as a discrepancy, do NOT go
-   searching other blocks/layers for "the missing HGVS," and do NOT conclude
-   the block's gene/variant identity is corrupted or mismatched with another
-   gene's block just because this one header lacks what every other header
-   has — that absence is normal for this specific block kind and nothing
-   else. A real past failure to not repeat: the model treated this expected
-   header format as a "critical discrepancy," searched a neighboring
-   unrelated gene's block for an HGVS to explain it, hallucinated that the
-   two blocks' data had been swapped, and spent its entire output budget
-   re-deriving this same false alarm in a loop instead of ever writing
-   section 2 — if the header has no HGVS and the block is this kind, that is
-   normal; get the HGVS from the Comment and move on immediately.
+   RECESSIVE blocks carry the HGVS in their header too, after the kind
+   label: "# Recessive Analysis (confirmed homozygous, biallelic) — GENE
+   (HGVS)". Copy it from there like any other block. A protein change quoted
+   inside a PS1/PM5 criterion line is a DIFFERENT ClinVar comparator variant
+   at the same residue — never the patient's own variant.
 
    [GENE] ([HGVS]) — [MOI layer tag — this names which layer PROCESSED the
    finding, not a confirmed inheritance claim. A variant lands in the DE NOVO
